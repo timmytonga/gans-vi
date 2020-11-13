@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10
 import torchvision.transforms as transforms
 
-from models import Generator, Discriminator
+from dcgan_models import Generator, Discriminator
 from wgan_gp_loss import disc_loss_wgan_gp, gen_loss_wgan_gp
 from datetime import datetime     # to get time stamp for checkpts
 import pytz
