@@ -3,12 +3,10 @@ import torch
 import torchvision
 
 
-# get inception score for p(y|x)
-# p_yx => p(y|x), where p_yx[y][x] = p(y|x)
-# eps is  arbitrarily small non-zero value
-
-
 def getIS(p_yx, eps=(1E-16)):
+	# get inception score for p(y|x)
+	# p_yx => p(y|x), where p_yx[y][x] = p(y|x)
+	# eps is  arbitrarily small non-zero value
 	# p(y) by averaging over x
 	p_y = p_yx.mean(axis=0)
 	p_y = np.expand_dims(p_y,0)                           # make dimensions of p_yx and p_y compatible
@@ -43,7 +41,7 @@ def inception_score(data, cuda=False, batch_size=32, resize=False, n_sec=1, eps=
 		if resize:
 			x = up(x)
 		x = model(x)
-		return torch.nn.functional.softmax(x).data.cpu().numpy()
+		return torch.nn.functional.softmax(x, dim=1).data.cpu().numpy()
 
 	# Do predictions
 	all_pyx = np.zeros((N,1000))
