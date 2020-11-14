@@ -56,7 +56,7 @@ def disc_loss_gp(fake_scores, real_scores, grad_penal, c_lambda):
 	return torch.mean(fake_scores) - torch.mean(real_scores) + c_lambda * grad_penal
 
 
-def disc_loss_wgan_gp(disc, real, fake, device):
+def disc_loss_wgan_gp(disc, real, fake, device, c_lambda):
 	""" Combine everything above to simplify """
 	fake_score = disc(fake.detach())  # no need to compute the grad here
 	real_score = disc(real)
