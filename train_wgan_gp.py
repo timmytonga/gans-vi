@@ -8,9 +8,7 @@ import torchvision.transforms as transforms
 
 from dcgan_models import Generator, Discriminator
 from wgan_gp_loss import disc_loss_wgan_gp, gen_loss_wgan_gp
-from datetime import datetime     # to get time stamp for checkpts
-import pytz
-from utils import make_noise, show_tensor_images
+from utils import make_noise, show_tensor_images, get_cur_timestamp
 
 
 from tqdm.auto import tqdm  # for visualizing progress per epoch
@@ -97,7 +95,7 @@ disc = disc.apply(weights_init)
 
 
 # =========================================================================== #
-#                  SET OPTIMIZERS HERE                                          #
+#                  SET OPTIMIZERS HERE                                        #
 # =========================================================================== #
 # define the Adam optimizers
 gen_opt = torch.optim.Adam(gen.parameters(), lr=lr, betas=(beta_1, beta_2))
@@ -109,12 +107,6 @@ disc_opt = torch.optim.Adam(disc.parameters(), lr=lr, betas=(beta_1, beta_2))
 # =========================================================================== #
 disc_loss_fn = disc_loss_wgan_gp
 gen_loss_fn = gen_loss_wgan_gp
-
-
-def get_cur_timestamp():
-	tz_NY = pytz.timezone('America/New_York')
-	dateTimeObj = datetime.now(tz_NY)
-	return dateTimeObj.strftime("[%d-%b-%Y(%H:%M)]")
 
 
 # =========================================================================== #

@@ -1,13 +1,9 @@
 # import and show image function
 import torch
-import torch.nn.functional as F
 import matplotlib.pyplot as plt
-from torch import nn
-from torch.utils.data import DataLoader
-# torchvision
 from torchvision.utils import make_grid
-from torchvision.datasets import CIFAR10
-import torchvision.transforms as transforms
+from datetime import datetime     # to get time stamp for checkpts
+import pytz
 
 
 def show_tensor_images(image_tensor, num_images=25):
@@ -26,4 +22,10 @@ def show_tensor_images(image_tensor, num_images=25):
 def make_noise(num_noise, z_dim=128, device='cpu'):
     """ Returns a tensor of size (num_noise, z_dim)"""
     return torch.randn(num_noise, z_dim, device=device)
+
+
+def get_cur_timestamp():
+    tz_NY = pytz.timezone('America/New_York')
+    dateTimeObj = datetime.now(tz_NY)
+    return dateTimeObj.strftime("[%d-%b-%Y(%H:%M)]")
 

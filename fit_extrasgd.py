@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from utils import show_tensor_images
 from collections import OrderedDict
 
+
 def fit_extrasgd(gen, gen2, gen_opt, disc, disc2, disc_opt, device, n_epochs, trainset1, trainset2, disc_repeats, make_noise, z_dim, disc_loss_fn, gen_loss_fn, display_step, c_lambda, lr, checkpt=True, loadcheckptpath=None):
 	# ================================================================== #
 	#       Initialize training vars and load checkpt if any             #
@@ -20,7 +21,7 @@ def fit_extrasgd(gen, gen2, gen_opt, disc, disc2, disc_opt, device, n_epochs, tr
 	disc_losses = []
 	img_history = []
 	last_epoch = 0
-    #added for averaging
+	# added for averaging
 	disc_p = {}
 	gen_p = {}
 	disc_step = 0
@@ -28,9 +29,7 @@ def fit_extrasgd(gen, gen2, gen_opt, disc, disc2, disc_opt, device, n_epochs, tr
 	gen2_losses = []
 	disc2_losses = []
 
-
-
-	if loadcheckptpath is not None:  # we were provided with checkpt. Load and resume
+	if loadcheckptpath is not None:    # we were provided with checkpt. Load and resume
 		print(f"========= Checkpoint found! Resuming training from last checkpoint at ======== \n{loadcheckptpath}")
 		print("Loading checkpoint...")
 		checkpoint = torch.load(loadcheckptpath)
