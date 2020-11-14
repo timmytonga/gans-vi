@@ -2,8 +2,8 @@ import torch
 import matplotlib.pyplot as plt
 from torch import nn
 from torch.utils.data import DataLoader
-# torchvision
-from torchvision.datasets import CIFAR10
+
+from torchvision.datasets import CIFAR10    # torchvision
 import torchvision.transforms as transforms
 
 from dcgan_models import Generator, Discriminator
@@ -108,11 +108,10 @@ disc_opt = torch.optim.Adam(disc.parameters(), lr=lr, betas=(beta_1, beta_2))
 disc_loss_fn = disc_loss_wgan_gp
 gen_loss_fn = gen_loss_wgan_gp
 
-
 # =========================================================================== #
 #                  FITTING                                                    #
 # =========================================================================== #
-display_step = 1000  # for displaying info after this many step (i.e. batch)
+display_step = 500  # for displaying info after this many step (i.e. batch)
 disc_repeats = 5  # how many times to train the discriminator per one generator
 check_point_after_epochs = 10  # checkpointing every these epochs
 n_epochs = 100
@@ -122,13 +121,17 @@ validation_noise = make_noise(25, z_dim, device=device)  # so we have a fixed va
 torch.manual_seed(int(time.time()))  # this should be random enough for fitting
 
 
-def fit(checkpt=True, loadcheckptpath=None):
+def fit(checkpt=True, loadcheckptpath=None, CHECKPOINT_NAME_TAG="checkpoint.pt"):
+	""" fit the models gen, disc in global var
+	CHECKPOINT_NAME_TAG specifies the naming for the checkpoint file
+	"""
 	# ================================================================== #
 	#       Initialize training vars and load checkpt if any             #
 	# ================================================================== #
 	step = 0
 	generator_losses = []
 	disc_losses = []
+	inception_scores = []
 	img_history = []
 	last_epoch = 0
 
@@ -149,8 +152,15 @@ def fit(checkpt=True, loadcheckptpath=None):
 		print(f"\tLoaded losses history.")
 		step = checkpoint['step']
 		print(f"\tLast step: {step}")
-		# img_history = checkpoint['img_history']
+		img_history = checkpoint['img_history']
+		inception_scores = checkpoint['inception_scores']
+		print("Loaded img_history and inception_scores")
 		print("===================== FINISHED LOADING LAST CHECKPOINT. TRAINING ===========")
+	else:
+		print("Checkpoint not found. Below is the first image with the validation noise.")
+		firstimg = gen(validation_noise)
+		show_tensor_images(firstimg)
+		img_history += [firstimg]
 
 	# ==================== BEGIN TRAINING ==================== #
 	print("Training with", device)
@@ -158,7 +168,7 @@ def fit(checkpt=True, loadcheckptpath=None):
 		print(f"EPOCH: {epoch}")
 		# Dataloader returns the batches
 		for real, label in tqdm(trainset):  # tqdm is just a progress bar
-			# make sure they are training
+			# make sure the models are set to training
 			gen.train()
 			disc.train()
 			cur_batch_size = len(real)
@@ -167,7 +177,7 @@ def fit(checkpt=True, loadcheckptpath=None):
 			# ================================================================== #
 			#                      Train the discriminator                       #
 			# ================================================================== #
-			mean_iteration_disc_loss = 0
+			mean_iteration_disc_loss = 0  # save the mean of the discrimator's loss
 			for _ in range(disc_repeats):  # train the discriminator this many times
 				# ======== First compute the losses on the current model ======== #
 				disc_opt.zero_grad()  # first zero out the grad
@@ -176,7 +186,7 @@ def fit(checkpt=True, loadcheckptpath=None):
 				noise = make_noise(cur_batch_size, z_dim, device=device)
 				fake = gen(noise)
 				# compute the loss (loss fn set above)
-				disc_loss = disc_loss_fn(disc, real, fake)
+				disc_loss = disc_loss_fn(disc, real, fake, device, c_lambda)
 				# Keep track of the average discriminator loss in this batch
 				mean_iteration_disc_loss += disc_loss.item() / disc_repeats
 
@@ -185,7 +195,7 @@ def fit(checkpt=True, loadcheckptpath=None):
 				# Update optimizer
 				disc_opt.step()
 
-			disc_losses += [mean_iteration_disc_loss]
+			disc_losses += [mean_iteration_disc_loss]  # add the loss for visualization
 
 			# ================================================================== #
 			#                      Train the generator                           #
@@ -206,40 +216,8 @@ def fit(checkpt=True, loadcheckptpath=None):
 			# Keep track of the generator loss
 			generator_losses += [gen_loss.item()]
 
-			# ================================================================== #
-			#                      Visualization                                 #
-			# ================================================================== #
-			if step % display_step == 0 and step > 0:
-				gen_mean = sum(generator_losses[-display_step:]) / display_step
-				disc_mean = sum(disc_losses[-display_step:]) / display_step
-				print(f"Step {step}: Generator loss: {gen_mean}, Discriminator's loss: {disc_mean}")
-				show_tensor_images(fake)
-				show_tensor_images(real)
-				step_bins = 20
-				num_examples = (len(generator_losses) // step_bins) * step_bins
-				plt.plot(
-					range(num_examples // step_bins),
-					torch.Tensor(generator_losses[:num_examples]).view(-1, step_bins).mean(1),
-					# range(len(generator_losses)),
-					# generator_losses,
-					label="Generator Loss"
-				)
-
-				plt.plot(
-					range(num_examples // step_bins),
-					torch.Tensor(disc_losses[:num_examples]).view(-1, step_bins).mean(1),
-					# range(len(disc_losses)),
-					# disc_losses,
-					label="Discriminator Loss"
-				)
-				plt.title('Mean loss of batch')
-				plt.legend()
-				plt.show()
-
-			step += 1
-
 		# ================================================================== #
-		#                       Validation (TODO)                            #
+		#                       Validation                                   #
 		# ================================================================== #
 		print(f"================= VALIDATION for EPOCH {epoch}==================")
 		print("-Overall losses:")
@@ -260,41 +238,56 @@ def fit(checkpt=True, loadcheckptpath=None):
 		)
 		plt.ylabel('loss')
 		plt.xlabel('number of batches processed')
-		plt.title('Loss over epochs for discriminator and generator')
+		plt.title('Loss over numbatches for discriminator and generator')
 		plt.legend()
 		plt.show()
-		print("Images")
+		print("Showing Validation Images")
 		valimg = gen(validation_noise)
 		show_tensor_images(valimg)
 		img_history += [valimg]
+		print("Showing Images Generated by Random Input")
+		show_tensor_images(gen(make_noise(25, z_dim, device=device)))
 
-		# ================================================================== #
-		#                      Check-pointing                                #
-		# ================================================================== #
+		# ==== We validate our progress by measuring inception score on "validation noise" that we fixed in the beginning =====
+		incept_score = inception_score(valimg, cuda=True, batch_size=batch_size, resize=True, n_sec=1)[0]
+		inception_scores.append(incept_score)
+		plt.plot(
+			range(len(inception_scores)),
+			inception_scores
+		)
+		plt.xlabel("Epoch")
+		plt.ylabel("Inception Score")
+		plt.title("Inception Scores over Epochs")
+		plt.show()
 
-		if checkpt and epoch % check_point_after_epochs == 0 and epoch > 0:
-			timestamp = get_cur_timestamp()
-			checkpt_file_path = CHECKPOINT_PATH + timestamp + "checkpoint.pt"
-			print(f"*** EPOCH {epoch} SAVING CHECKPOINTS AT {checkpt_file_path} ***")
-			save_dict = {
-				'epoch': epoch,
-				'disc_state_dict': disc.state_dict(),
-				'gen_state_dict': gen.state_dict(),
-				'disc_opt_state_dict': disc_opt.state_dict(),
-				'gen_opt_state_dict': gen_opt.state_dict(),
-				'generator_losses': generator_losses,
-				'disc_losses': disc_losses,
-				'step': step,
-				'img_history': img_history
-			}
-			torch.save(save_dict, checkpt_file_path)
+	# ================================================================== #
+	#                      Check-pointing                                #
+	# ================================================================== #
+
+	if checkpt and epoch % check_point_after_epochs == 0 and epoch > 0:
+		timestamp = get_cur_timestamp()
+		checkpt_file_path = CHECKPOINT_PATH + timestamp + CHECKPOINT_NAME_TAG
+		print(f"*** EPOCH {epoch} SAVING CHECKPOINTS AT {checkpt_file_path} ***")
+		save_dict = {
+			'epoch': epoch,
+			'disc_state_dict': disc.state_dict(),
+			'gen_state_dict': gen.state_dict(),
+			'disc_opt_state_dict': disc_opt.state_dict(),
+			'gen_opt_state_dict': gen_opt.state_dict(),
+			'generator_losses': generator_losses,
+			'disc_losses': disc_losses,
+			'step': step,
+			'img_history': img_history,
+			'inception_scores': inception_scores
+		}
+		torch.save(save_dict, checkpt_file_path)
 
 
 # FIT WITHOUT CHECKPOINTS ####
-# fit()
+fit()
 
 # USE THIS FIT VERSION FOR FITTING WITH CHECKPOINTS ###
-fit(checkpt=ENABLE_CHECKPOINT, loadcheckptpath=CHECKPOINTFILEPATH)
+# fit(checkpt=ENABLE_CHECKPOINT, loadcheckptpath=CHECKPOINTFILEPATH)
 
 
 # ================= #
