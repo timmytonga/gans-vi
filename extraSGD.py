@@ -4,7 +4,6 @@ Created on Sun Nov 15 11:22:57 2020
 
 @author: User
 """
-
 import torch
 
 from torch.optim import Optimizer
@@ -40,12 +39,12 @@ class extraSGD(Optimizer):
 		i = 0
 		for group in self.param_groups:
 			for p in group['params']:
-				p.data = self.params_copy[i]
-				i += 1
 				if p.grad is None:
 					continue
 				d_p = p.grad
-				p.add_(d_p, alpha=-group['lr'])
+				p.data = self.params_copy[i].add_(d_p, alpha=-group['lr'])
+				i += 1
+
 				
 		self.params_copy = []		
 		return loss
