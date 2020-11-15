@@ -7,7 +7,7 @@ Created on Sun Nov 15 11:22:57 2020
 
 import torch
 
-from .optimizer import Optimizer, required
+from torch.optim import Optimizer, required
 
 class extraSGD(Optimizer):
 	
