@@ -16,7 +16,7 @@ class extraSGD(Optimizer):
 		if lr is not required and lr < 0.0:
 			raise ValueError("Invalid learning rate: {}".format(lr))
 		defaults = dict(lr=lr)
-		super(extraSGD, self).__init(params, defaults)
+		super(extraSGD, self).__init__(params, defaults)
 		self.params_copy = []
 		
 	
