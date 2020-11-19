@@ -12,7 +12,9 @@ def show_tensor_images(image_tensor, num_images=25, unnorm_mean = (0,0,0), unnor
     size per image, plots and prints the images in an uniform grid.
 
     """
-    image_tensor = image_tensor.mul(unnorm_var).add(unnorm_mean) 
+    var = torch.tensor(unnorm_var)
+    mean = torch.tensor(unnorm_mean)
+    image_tensor = image_tensor.mul_(var).add_(mean) 
     image_unflat = image_tensor.detach().cpu()
     image_grid = make_grid(image_unflat[:num_images], nrow=5)
     plt.imshow(image_grid.permute(1, 2, 0).squeeze())
