@@ -61,7 +61,7 @@ class Generator(nn.Module):
         return self.network(x)
 
 
-class Discriminator(Discriminator):
+class Discriminator(nn.Module):
     def __init__(self, n_in, n_out, num_filters=128, batchnorm=False):
         super(Discriminator, self).__init__()
 
