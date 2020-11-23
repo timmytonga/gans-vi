@@ -41,7 +41,7 @@ class ResBlock(nn.Module):
 
 class Generator(nn.Module):
     def __init__(self, n_in, n_out, num_filters=128, batchnorm=True):
-        super(ResNet32Generator, self).__init__()
+        super(Generator, self).__init__()
         self.num_filters = num_filters
 
         self.input = nn.Linear(n_in, 4*4*num_filters)
@@ -63,7 +63,7 @@ class Generator(nn.Module):
 
 class Discriminator(Discriminator):
     def __init__(self, n_in, n_out, num_filters=128, batchnorm=False):
-        super(ResNet32Discriminator, self).__init__()
+        super(Discriminator, self).__init__()
 
         self.block1 = nn.Sequential(nn.Conv2d(3, num_filters, 3, padding=1),
                                     nn.ReLU(),
