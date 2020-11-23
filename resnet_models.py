@@ -40,7 +40,7 @@ class ResBlock(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self, n_in, n_out, num_filters=128, batchnorm=True):
+    def __init__(self, n_in=128, n_out=3, num_filters=128, batchnorm=True):
         super(Generator, self).__init__()
         self.num_filters = num_filters
 
@@ -62,7 +62,7 @@ class Generator(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, n_in, n_out, num_filters=128, batchnorm=False):
+    def __init__(self, n_in=3, n_out=1, num_filters=128, batchnorm=False):
         super(Discriminator, self).__init__()
 
         self.block1 = nn.Sequential(nn.Conv2d(3, num_filters, 3, padding=1),
