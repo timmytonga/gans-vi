@@ -19,7 +19,6 @@ class extraSGD(Optimizer):
 		self.params_copy = []
 		
 	
-	@torch.no_grad()
 	
 	def extra(self, closure=None):
 			
