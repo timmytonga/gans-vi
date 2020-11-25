@@ -19,7 +19,7 @@ class extraSGD(Optimizer):
 		self.params_copy = []
 		
 	
-	
+	@torch.no_grad()
 	def extra(self, closure=None):
 			
 		for group in self.param_groups:
@@ -30,7 +30,7 @@ class extraSGD(Optimizer):
 				d_p = p.grad
 				p.add_(d_p, alpha=-group['lr'])
 
-		
+	@torch.no_grad()	
 	def step(self, closure=None):
 		loss = None
 		if closure is not None:
