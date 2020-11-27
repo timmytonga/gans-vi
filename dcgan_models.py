@@ -17,17 +17,17 @@ class Generator(nn.Module):
 		self.layer1 = nn.Sequential(
 			nn.ConvTranspose2d(self.z_dim, 512, kernel_size=4),
 			nn.BatchNorm2d(512),
-			nn.ReLU(inplace=True)
+			nn.ReLU()
 		)
 		self.layer2 = nn.Sequential(
 			nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1),
 			nn.BatchNorm2d(256),
-			nn.ReLU(inplace=True)
+			nn.ReLU()
 		)
 		self.layer3 = nn.Sequential(
 			nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
 			nn.BatchNorm2d(128),
-			nn.ReLU(inplace=True)
+			nn.ReLU()
 		)
 		self.final_layer = nn.Sequential(
 			nn.ConvTranspose2d(128, 3, kernel_size=4, stride=2, padding=1),
