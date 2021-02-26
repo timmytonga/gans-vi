@@ -9,18 +9,18 @@ import optimizers.optim.extragradient as ExtraGradient
 import optimizers.optim.omd as OMD
 import optimizers.adasls.adasls as adasls
 import optimizers.adasls.sls as sls
-import optimizers.adasls.sps as sps
 
-from models import DCGAN32Generator, DCGAN32Discriminator, ResNet32Generator, ResNet32Discriminator
+from models.dcgan import DCGAN32Generator, DCGAN32Discriminator
+from models.resnet import ResNet32Generator, ResNet32Discriminator
 
 
 def retrieve_optimizer(opt_dict,
                        generator,
                        discriminator,
                        n_train,
-                       epochs,
                        batch_size):
     opt_name = opt_dict["name"]
+    n_batches_per_epoch = n_train / batch_size
     if opt_dict["name"] == "extraadam" or opt_dict["name"] == "pastadam":
         dis_optimizer = ExtraGradient.ExtraAdam(discriminator.parameters(),
                                                 lr=opt_dict["DLR"],
@@ -37,7 +37,26 @@ def retrieve_optimizer(opt_dict,
                                            betas=(opt_dict["BETA1"], opt_dict["BETA2"]))
     elif opt_name == "adaptive_first":
 
-        opt = adasls.AdaSLS(params,
+        gen_optimizer = adasls.AdaSLS(gen.parameters(),
+                     c=opt_dict['c'],
+                     n_batches_per_epoch=n_batches_per_epoch,
+                     gv_option=opt_dict.get('gv_option', 'per_param'),
+                     base_opt=opt_dict['base_opt'],
+                     pp_norm_method=opt_dict['pp_norm_method'],
+                     momentum=opt_dict.get('momentum', 0),
+                     beta=opt_dict.get('beta', 0.99),
+                     gamma=opt_dict.get('gamma', 2),
+                     init_step_size=opt_dict.get('init_step_size', 1),
+                     adapt_flag=opt_dict.get('adapt_flag', 'constant'),
+                     step_size_method=opt_dict['step_size_method'],
+                     # sls stuff
+                     beta_b=opt_dict.get('beta_b', .9),
+                     beta_f=opt_dict.get('beta_f', 2.),
+                     reset_option=opt_dict.get('reset_option', 1),
+                     line_search_fn=opt_dict.get('line_search_fn', "armijo"),
+                     mom_type=opt_dict.get('mom_type', "standard"),
+                     )
+        dis_optimizer = adasls.AdaSLS(dis.parameters(),
                      c=opt_dict['c'],
                      n_batches_per_epoch=n_batches_per_epoch,
                      gv_option=opt_dict.get('gv_option', 'per_param'),
@@ -65,7 +84,16 @@ def retrieve_optimizer(opt_dict,
         else:
             c = opt_dict.get("c") or 0.1
 
-        opt = sls.Sls(params,
+        gen_optimizer = sls.Sls(gen.parameters(),
+                      c=c,
+                      n_batches_per_epoch=n_batches_per_epoch,
+                      init_step_size=opt_dict.get("init_step_size", 1),
+                      line_search_fn=opt_dict.get("line_search_fn", "armijo"),
+                      gamma=opt_dict.get("gamma", 2.0),
+                      reset_option=opt_dict.get("reset_option", 1),
+                      eta_max=opt_dict.get("eta_max"))
+
+        dis_optimizer = sls.Sls(dis.parameters(),
                       c=c,
                       n_batches_per_epoch=n_batches_per_epoch,
                       init_step_size=opt_dict.get("init_step_size", 1),
@@ -75,11 +103,17 @@ def retrieve_optimizer(opt_dict,
                       eta_max=opt_dict.get("eta_max"))
 
     elif opt_name == "sgd_goldstein":
-        opt = sls.Sls(params,
-                      c=opt_dict.get("c") or 0.1,
-                      reset_option=opt_dict.get("reset_option") or 0,
-                      n_batches_per_epoch=n_batches_per_epoch,
-                      line_search_fn="goldstein")
+        gen_optimizer = sls.Sls(gen.parameters(),
+                              c=opt_dict.get("c") or 0.1,
+                              reset_option=opt_dict.get("reset_option") or 0,
+                              n_batches_per_epoch=n_batches_per_epoch,
+                              line_search_fn="goldstein")
+
+        dis_optimizer = sls.Sls(dis.parameters(),
+                              c=opt_dict.get("c") or 0.1,
+                              reset_option=opt_dict.get("reset_option") or 0,
+                              n_batches_per_epoch=n_batches_per_epoch,
+                              line_search_fn="goldstein")
     else:
         raise AssertionError("Failed to retrieve optimizer: No optimizer of name: {}", opt_dict["name"])
 
@@ -156,11 +190,12 @@ def extra_adam_runner(trainloader, generator, discriminator, optim_params, outpu
                 for p in dis.parameters():
                     p.data.clamp_(-args.clip, args.clip)
 
-            if (gen_updates + 1) % 1000 == 0:
 
 
 
 ag = argparse.ArgumentParser()
+
+print("CURRENT WORKING DIRECTIONR: {}".format(os.getcwd()))
 
 # Run parameters
 ag.add_argument("--cuda", action="store_true")
@@ -223,6 +258,7 @@ def setup_dirs():
         os.mkdir(args.outdir)
     os.mkdir(output_dir)
 
+setup_dirs()
 
 def get_dataset(name: str, train: bool):
     if name == "cifar10":

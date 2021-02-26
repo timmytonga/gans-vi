@@ -1,2 +1,3 @@
-from extragradient import *
-from omd import *
+from models.dcgan import *
+from models.discriminator import *
+from models.resnet import *
