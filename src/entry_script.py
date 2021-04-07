@@ -9,13 +9,16 @@ import json
 import optimizers.optim.extragradient as ExtraGradient
 import optimizers.optim.omd as OMD
 import optimizers.adasls.adasls as adasls
-import optimizers.adasls.sls as sls
+import numpy as np
 import tqdm
+import wandb
 
 from torch.autograd import Variable
 
 from models.dcgan import DCGAN32Generator, DCGAN32Discriminator
 from models.resnet import ResNet32Generator, ResNet32Discriminator
+
+
 
 
 def retrieve_optimizer(opt_dict,
@@ -39,6 +42,13 @@ def retrieve_optimizer(opt_dict,
         gen_optimizer = OMD.OptimisticAdam(generator.parameters(),
                                            lr=opt_dict["learning_rate_gen"],
                                            betas=(opt_dict["beta1"], opt_dict["beta2"]))
+    elif opt_dict["name"] == "adam":
+        dis_optimizer = torch.optim.Adam(discriminator.parameters(),
+                                         lr=opt_dict["learning_rate_dis"],
+                                         betas=(opt_dict["beta1"], opt_dict["beta2"]))
+        gen_optimizer = torch.optim.Adam(generator.parameters(),
+                                         lr=opt_dict["learning_rate_gen"],
+                                         betas=(opt_dict["beta1"], opt_dict["beta2"]))
     elif opt_name == "adaptive_first":
 
         gen_optimizer = adasls.AdaSLS(generator.parameters(),
@@ -79,61 +89,28 @@ def retrieve_optimizer(opt_dict,
                      line_search_fn=opt_dict.get('line_search_fn', "armijo"),
                      mom_type=opt_dict.get('mom_type', "standard"),
                      )
-
-    elif opt_name == "sgd_armijo":
-        # if opt_dict.get("infer_c"):
-        #     c = (1e-3) * np.sqrt(n_batches_per_epoch)
-        if opt_dict['c'] == 'theory':
-            c = (n_train - batch_size) / (2 * batch_size * (n_train - 1))
-        else:
-            c = opt_dict.get("c") or 0.1
-
-        gen_optimizer = sls.Sls(generator.parameters(),
-                      c=c,
-                      n_batches_per_epoch=n_batches_per_epoch,
-                      init_step_size=opt_dict.get("init_step_size", 1),
-                      line_search_fn=opt_dict.get("line_search_fn", "armijo"),
-                      gamma=opt_dict.get("gamma", 2.0),
-                      reset_option=opt_dict.get("reset_option", 1),
-                      eta_max=opt_dict.get("eta_max"))
-
-        dis_optimizer = sls.Sls(discriminator.parameters(),
-                      c=c,
-                      n_batches_per_epoch=n_batches_per_epoch,
-                      init_step_size=opt_dict.get("init_step_size", 1),
-                      line_search_fn=opt_dict.get("line_search_fn", "armijo"),
-                      gamma=opt_dict.get("gamma", 2.0),
-                      reset_option=opt_dict.get("reset_option", 1),
-                      eta_max=opt_dict.get("eta_max"))
-
-    elif opt_name == "sgd_goldstein":
-        gen_optimizer = sls.Sls(generator.parameters(),
-                              c=opt_dict.get("c") or 0.1,
-                              reset_option=opt_dict.get("reset_option") or 0,
-                              n_batches_per_epoch=n_batches_per_epoch,
-                              line_search_fn="goldstein")
-
-        dis_optimizer = sls.Sls(discriminator.parameters(),
-                              c=opt_dict.get("c") or 0.1,
-                              reset_option=opt_dict.get("reset_option") or 0,
-                              n_batches_per_epoch=n_batches_per_epoch,
-                              line_search_fn="goldstein")
     else:
         raise AssertionError("Failed to retrieve optimizer: No optimizer of name: {}", opt_dict["name"])
 
     return dis_optimizer, gen_optimizer
 
 
-def step(opt_name, optimizer, ts):
-    if opt_name == "extraadam":
+def step(opt_params, optimizer, ts, loss, retain_graph=False):
+    if opt_params["name"] == "extraadam":
+        loss.backward(retain_graph=retain_graph)
         if (ts + 1) % 2 != 0:
             optimizer.extrapolation()
             return 0
         else:
             optimizer.step()
             return 1
-    elif opt_name == "pastadam" or opt_name == "optimisticadam":
+    elif opt_params["name"] == "pastadam" or opt_params["name"] == "optimisticadam" or opt_params["name"] == "adam":
+        loss.backward(retain_graph=retain_graph)
         optimizer.step()
+        return 1
+    elif opt_params["name"] == "adaptive_first":
+        closure = lambda: loss
+        optimizer.step(closure=closure, retain_graph=retain_graph)
         return 1
 
 
@@ -157,60 +134,76 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
         for i, data in loop:
             x_true, _ = data
             x_true = torch.autograd.Variable(x_true)
+
+            z = torch.autograd.Variable(utils.sample(model_params["distribution"], (len(x_true), model_params["num_latent"])))
             if cuda:
                 x_true = x_true.cuda(0)
-
-            z = torch.autograd.Variable(utils.sample("normal", (len(x_true), model_params["num_latent"])))
-            if cuda:
                 z = z.cuda(0)
+
+            if optim_params["name"] == "pastadam":
+                dis_optimizer.extrapolation()
+                gen_optimizer.extrapolation()
+
+                if model_params["mode"] == "wgan" and model_params["gradient_penalty"] == 0.0:
+                    for p in discriminator.parameters():
+                        p.data.clamp_(-model_params["CLIP"], model_params["CLIP"])
 
             x_gen = generator(z)
             p_true, p_gen = discriminator(x_true), discriminator(x_gen)
-            gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
-            dis_loss = - gen_loss.clone()
 
-            if model_params["gradient_penalty"] != 0:
-                penalty = discriminator.get_penalty(x_true.data, x_gen.data)
-                dis_loss += model_params["gradient_penalty"] * penalty
+            if optim_params["name"] != "adam":
 
-            # Discriminator Update
-            for p in generator.parameters():
-                p.requires_grad = False
+                gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
+                dis_loss = - gen_loss.clone()
 
-            dis_optimizer.zero_grad()
-            dis_loss.backward(retain_graph=True)
+                loop.set_description(f"EPOCH: {epoch}")
+                loop.set_postfix(GEN_UPDATE="{}/{}".format(gen_updates, model_params["num_iter"]),
+                                 DISLOSS=dis_loss.item(),
+                                 GENLOSS=gen_loss.item())
 
-            step(optim_params["name"], dis_optimizer, current_iter)
+                wandb.log({"gloss": gen_loss.item(), "dloss": dis_loss.item()})
 
-            # Generaator Update
-            for p in generator.parameters():
-                p.requires_grad = True
+                if model_params["gradient_penalty"] != 0:
+                    penalty = discriminator.get_penalty(x_true.data, x_gen.data)
+                    dis_loss += model_params["gradient_penalty"] * penalty
 
-            for p in discriminator.parameters():
-                p.requires_grad = False
+                # Discriminator Update
+                for p in generator.parameters():
+                    p.requires_grad = False
 
-            gen_optimizer.zero_grad()
-            gen_loss.backward()
+                dis_optimizer.zero_grad()
+                #dis_loss.backward(retain_graph=True)
 
-            gen_updates += step(optim_params["name"], gen_optimizer, current_iter)
+                step(optim_params, dis_optimizer, current_iter, dis_loss, retain_graph=True)
 
-            for p in discriminator.parameters():
-                p.requires_grad = True
+                # Generaator Update
+                for p in generator.parameters():
+                    p.requires_grad = True
 
-            if model_params["mode"] == "wgan" and model_params["gradient_penalty"] == 0:
                 for p in discriminator.parameters():
-                    p.data.clamp_(-model_params["clip"], model_params["clip"])
+                    p.requires_grad = False
 
-            current_iter += 1
+                gen_optimizer.zero_grad()
+                #gen_loss.backward()
 
-            loop.set_description(f"EPOCH: {epoch}")
-            loop.set_postfix(GEN_UPDATE="{}/{}".format(gen_updates, model_params["num_iter"]),
-                             DISLOSS=dis_loss.item(),
-                             GENLOSS=gen_loss.item())
+                gen_updates += step(optim_params, gen_optimizer, current_iter, gen_loss)
+
+                for p in discriminator.parameters():
+                    p.requires_grad = True
+
+                if model_params["mode"] == "wgan" and model_params["gradient_penalty"] == 0:
+                    for p in discriminator.parameters():
+                        p.data.clamp_(-model_params["clip"], model_params["clip"])
+
+                current_iter += 1
+
+
+
+
         epoch += 1
 
 
-def run_config(all_params, dataset: str):
+def run_config(all_params, dataset: str, experiment_name: str):
     model_params = all_params["model_params"]
     opt_params = all_params["optimizer_params"]
 
@@ -221,8 +214,6 @@ def run_config(all_params, dataset: str):
 
         raise KeyError(f"Missing required parameter {key_name} in model_params for given config file.")
 
-
-    OPTIMIZER_NAME = opt_params["name"]
     MODEL = get_or_error(model_params, "model")
     N_LATENT = get_or_error(model_params, "num_latent")
     N_FILTERS_G = get_or_error(model_params, "num_filters_gen")
@@ -235,9 +226,11 @@ def run_config(all_params, dataset: str):
     OUTDIR = "outdir"
     DATADIR = "datadir"
     SEED = get_or_error(model_params, "seed")
-    torch.manual_seed(SEED)
+    # torch.manual_seed(SEED)
+    # np.random.seed(SEED)
+    # torch.cuda.manual_seed_all(SEED)
 
-    dir_name = os.path.join("o{}".format(OPTIMIZER_NAME),
+    dir_name = os.path.join("o{}".format(experiment_name),
                             "m{}".format(MODEL),
                             "t{}".format(datetime.datetime.now().strftime("%Y%m%d%H%M%S")))
     output_dir = os.path.join(OUTDIR, dir_name)
@@ -275,13 +268,12 @@ def run_config(all_params, dataset: str):
     training_set = get_dataset(dataset, True)
     test_set = get_dataset(dataset, False)
 
-
     if MODEL == "resnet":
-        gen = ResNet32Generator(n_in=N_LATENT, n_out=N_CHANNEL, num_filters=N_FILTERS_G, batchnorm=BATCH_NORM_G)
-        dis = ResNet32Discriminator(n_in=N_CHANNEL, n_out=1, num_filters=N_FILTERS_D, batchnorm=BATCH_NORM_D)
+        gen = ResNet32Generator(N_LATENT, N_CHANNEL, N_FILTERS_G, BATCH_NORM_G)
+        dis = ResNet32Discriminator(N_CHANNEL, 1, N_FILTERS_D, BATCH_NORM_D)
     elif MODEL == "dcgan":
-        gen = DCGAN32Generator(n_in=N_LATENT, n_out=N_CHANNEL, n_filters=N_FILTERS_G, batchnorm=BATCH_NORM_G)
-        dis = DCGAN32Discriminator(n_in=N_CHANNEL, n_out=1, n_filters=N_FILTERS_D, batchnorm=BATCH_NORM_D)
+        gen = DCGAN32Generator(N_LATENT, N_CHANNEL, N_FILTERS_G, batchnorm=BATCH_NORM_G)
+        dis = DCGAN32Discriminator(N_CHANNEL, 1, N_FILTERS_D, batchnorm=BATCH_NORM_D)
     else:
         raise KeyError(f"{MODEL} model not recognized")
 
@@ -289,21 +281,109 @@ def run_config(all_params, dataset: str):
         gen = gen.cuda(0)
         dis = dis.cuda(0)
 
+    wandb.watch(gen)
+
     gen.apply(lambda x: utils.weight_init(x, mode=DISTRIBUTION))
     dis.apply(lambda x: utils.weight_init(x, mode=DISTRIBUTION))
 
     runner(training_set, gen, dis, opt_params, output_dir, model_params, CUDA)
 
 
-if __name__ == "__main__":
+def retrieve_line_search_paper_parameters():
+    # ------------------ #
+    # III. Adaptive with first order preconditioners + line-search/SPS
+    # 1. Adaptive + SLS
+    # 1.1. Lipschitz + Adagrad
+    reset_option_list = [0, 1]
 
+    adaptive_first_sls_lipschitz_list = []
+    for reset_option in reset_option_list:
+        adaptive_first_sls_lipschitz_list += [{'name': 'adaptive_first',
+                                               'c': np.random.uniform(low=0.1, high=0.8),
+                                               'gv_option': 'per_param',
+                                               'base_opt': 'adagrad',
+                                               'pp_norm_method': 'pp_lipschitz',
+                                               'init_step_size': 100,
+                                               # setting init step-size to 100. SLS should be robust to this
+                                               "momentum": 0.,
+                                               'step_size_method': 'sls',
+                                               'reset_option': reset_option}]
+
+    # 1.2. Armijo + Adam / Amsgrad / Amsgrad
+    adaptive_first_sls_armijo_list = []
+    reset_option_list = [0, 1]
+    base_opt_list = ['adam', 'amsgrad', 'adagrad']
+
+    for base_opt in base_opt_list:
+        for reset_option in reset_option_list:
+            adaptive_first_sls_armijo_list += [{'name': 'adaptive_first',
+                                                'c': np.random.uniform(low=0.1, high=0.55),
+                                                'gv_option': 'per_param',
+                                                'base_opt': base_opt,
+                                                'pp_norm_method': 'pp_armijo',
+                                                'init_step_size': 100,
+                                                # setting init step-size to 100. SLS should be robust to this
+                                                "momentum": 0.,
+                                                'step_size_method': 'sls',
+                                                'reset_option': reset_option}]
+
+
+    # 2. Adaptive + SPS / Only Armijo
+    base_opt_list = ['adam', 'amsgrad', 'adagrad']
+
+    adaptive_first_sps_list = []
+    for base_opt in base_opt_list:
+        adaptive_first_sps_list += [{'name': 'adaptive_first',
+                                     'c': np.random.uniform(low=0.2, high=1),
+                                     'gv_option': 'per_param',
+                                     'base_opt': base_opt,
+                                     'pp_norm_method': 'pp_armijo',
+                                     'init_step_size': 1,
+                                     "momentum": 0.,
+                                     'step_size_method': 'sps',
+                                     'adapt_flag': 'smooth_iter'}]
+
+    # standard momentum
+    opt_list = []
+    for base_opt in base_opt_list:
+        opt_list += [{'name': 'adaptive_first',
+                      'mom_type': "standard",
+                      'c': np.random.uniform(low=0.1, high=0.2),
+                      'gv_option': 'per_param',
+                      'base_opt': base_opt,
+                      'pp_norm_method': 'pp_armijo',
+                      'init_step_size': 100,  # setting init step-size to 100. SLS should be robust to this
+                      "momentum": np.random.uniform(low=0, high=0.95),
+                      'step_size_method': 'sls',
+                      'reset_option': 1}]
+
+    for base_opt in base_opt_list:
+        opt_list += [{'name': 'adaptive_first',
+                      'mom_type': "heavy_ball",
+                      'c': np.random.uniform(low=0.15, high=0.25),
+                      'gv_option': 'per_param',
+                      'base_opt': base_opt,
+                      'pp_norm_method': 'pp_armijo',
+                      'init_step_size': 100,  # setting init step-size to 100. SLS should be robust to this
+                      "momentum": np.random.uniform(low=0, high=0.95),
+                      'step_size_method': 'sls',
+                      'reset_option': 1}]
+
+    return opt_list + adaptive_first_sls_lipschitz_list + adaptive_first_sls_lipschitz_list + adaptive_first_sps_list
+
+
+if __name__ == "__main__":
+    wandb.init(project='optimproj')
+    #torch.autograd.set_detect_anomaly(True)
     if not torch.cuda.is_available():
         print("CUDA is not enabled; enable CUDA for pytorch in order to run script")
         exit()
 
     print("CURRENT WORKING DIRECTORY: {}".format(os.getcwd()))
 
-    with open("../config/default_dcgan_wgan_extraadam.json") as f:
+    with open("../config/default_dcgan_wgangp_optimisticextraadam.json") as f:
         all_params = json.load(f)
 
-    run_config(all_params, "cifar10")
+    all_params["optimizer_params"] = retrieve_line_search_paper_parameters()[2]
+    print(json.dumps(all_params["optimizer_params"], indent=4))
+    run_config(all_params, "cifar10", "testexperiment")

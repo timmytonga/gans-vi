@@ -91,7 +91,7 @@ class AdaSLS(torch.optim.Optimizer):
 
     # if self.mom_type == 'standard' and self.momentum != 0.:
     #     assert self.step_size_method == 'fixed_step_size', 'standard only works with fixed step size'
-    def step(self, closure, clip_grad=False):
+    def step(self, closure, clip_grad=False, retain_graph=False):
         # increment step
         self.state['step'] += 1
 
@@ -103,7 +103,7 @@ class AdaSLS(torch.optim.Optimizer):
         
         # get loss and compute gradients
         loss = closure_deterministic()
-        loss.backward()
+        loss.backward(retain_graph=retain_graph)
 
         if clip_grad:
             torch.nn.utils.clip_grad_norm_(self.params, 0.25)
