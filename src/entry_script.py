@@ -114,7 +114,7 @@ def step(opt_params, optimizer, ts, loss, retain_graph=False):
         return 1
 
 
-def runner(trainloader, generator, discriminator, optim_params, output_path, model_params, cuda):
+def runner(trainloader, generator, discriminator, optim_params, output_path, model_params, device):
 
     dis_optimizer, gen_optimizer = retrieve_optimizer(optim_params, generator, discriminator, len(trainloader), model_params["batch_size"])
     print("Training Optimizer ({}) on ({})".format(optim_params["name"], model_params["model"]))
@@ -128,17 +128,15 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
     epoch = 1
     while gen_updates < model_params["num_iter"]:
         penalty = Variable(torch.Tensor([0.]))
-        if cuda:
-            penalty = penalty.cuda(0)
+        penalty = penalty.to(device=device)
         loop = tqdm.tqdm(enumerate(trainloader), total=len(trainloader), leave=False)
         for i, data in loop:
             x_true, _ = data
             x_true = torch.autograd.Variable(x_true)
 
             z = torch.autograd.Variable(utils.sample(model_params["distribution"], (len(x_true), model_params["num_latent"])))
-            if cuda:
-                x_true = x_true.cuda(0)
-                z = z.cuda(0)
+            x_true = x_true.to(device)
+            z = z.to(device)
 
             if optim_params["name"] == "pastadam":
                 dis_optimizer.extrapolation()
@@ -161,7 +159,7 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
                                  DISLOSS=dis_loss.item(),
                                  GENLOSS=gen_loss.item())
 
-                wandb.log({"gloss": gen_loss.item(), "dloss": dis_loss.item()})
+                wandb.log({"gloss": gen_loss.item(), "dloss": dis_loss.item(), "epoch": epoch})
 
                 if model_params["gradient_penalty"] != 0:
                     penalty = discriminator.get_penalty(x_true.data, x_gen.data)
@@ -222,7 +220,11 @@ def run_config(all_params, dataset: str, experiment_name: str):
     BATCH_NORM_G = True
     BATCH_NORM_D = get_or_error(model_params, "batchnorm_dis")
     N_CHANNEL = 3
-    CUDA = True
+    CUDA = 0
+    if isinstance(CUDA, int):
+        device = torch.device(f"cuda:{CUDA}")
+    else:
+        device = torch.device("cpu")
     OUTDIR = "outdir"
     DATADIR = "datadir"
     SEED = get_or_error(model_params, "seed")
@@ -277,16 +279,15 @@ def run_config(all_params, dataset: str, experiment_name: str):
     else:
         raise KeyError(f"{MODEL} model not recognized")
 
-    if CUDA:
-        gen = gen.cuda(0)
-        dis = dis.cuda(0)
+    gen = gen.to(device=device)
+    dis = dis.to(device=device)
 
     wandb.watch(gen)
 
     gen.apply(lambda x: utils.weight_init(x, mode=DISTRIBUTION))
     dis.apply(lambda x: utils.weight_init(x, mode=DISTRIBUTION))
 
-    runner(training_set, gen, dis, opt_params, output_dir, model_params, CUDA)
+    runner(training_set, gen, dis, opt_params, output_dir, model_params, device)
 
 
 def retrieve_line_search_paper_parameters():
@@ -373,7 +374,7 @@ def retrieve_line_search_paper_parameters():
 
 
 if __name__ == "__main__":
-    wandb.init(project='optimproj')
+
     #torch.autograd.set_detect_anomaly(True)
     if not torch.cuda.is_available():
         print("CUDA is not enabled; enable CUDA for pytorch in order to run script")
@@ -385,5 +386,6 @@ if __name__ == "__main__":
         all_params = json.load(f)
 
     all_params["optimizer_params"] = retrieve_line_search_paper_parameters()[2]
+    wandb.init(project='optimproj', config=all_params)
     print(json.dumps(all_params["optimizer_params"], indent=4))
     run_config(all_params, "cifar10", "testexperiment")
