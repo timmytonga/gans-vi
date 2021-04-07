@@ -126,10 +126,16 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
     gen_updates = 0
     current_iter = 0
     epoch = 1
+    postfix_kwargs = {}
+
     while gen_updates < model_params["num_iter"]:
         penalty = Variable(torch.Tensor([0.]))
         penalty = penalty.to(device=device)
         loop = tqdm.tqdm(enumerate(trainloader), total=len(trainloader), leave=False)
+
+        loop.set_description(f"EPOCH: {epoch}")
+        epoch_dis_loss = []
+        epoch_gen_loss = []
         for i, data in loop:
             x_true, _ = data
             x_true = torch.autograd.Variable(x_true)
@@ -149,17 +155,17 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
             x_gen = generator(z)
             p_true, p_gen = discriminator(x_true), discriminator(x_gen)
 
-            if optim_params["name"] != "adam":
+            if optim_params["name"] != "adam" and optim_params["name"] != "adaptive_first":
 
                 gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
                 dis_loss = - gen_loss.clone()
 
-                loop.set_description(f"EPOCH: {epoch}")
-                loop.set_postfix(GEN_UPDATE="{}/{}".format(gen_updates, model_params["num_iter"]),
-                                 DISLOSS=dis_loss.item(),
-                                 GENLOSS=gen_loss.item())
+                postfix_kwargs = {"GEN_UPDATE":"{}/{}".format(gen_updates, model_params["num_iter"]),
+                                 "DISLOSS": dis_loss.item(),
+                                 "GENLOSS":gen_loss.item()}
 
-                wandb.log({"gloss": gen_loss.item(), "dloss": dis_loss.item(), "epoch": epoch})
+                epoch_dis_loss.append(dis_loss.item())
+                epoch_gen_loss.append(gen_loss.item())
 
                 if model_params["gradient_penalty"] != 0:
                     penalty = discriminator.get_penalty(x_true.data, x_gen.data)
@@ -170,7 +176,6 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
                     p.requires_grad = False
 
                 dis_optimizer.zero_grad()
-                #dis_loss.backward(retain_graph=True)
 
                 step(optim_params, dis_optimizer, current_iter, dis_loss, retain_graph=True)
 
@@ -182,7 +187,6 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
                     p.requires_grad = False
 
                 gen_optimizer.zero_grad()
-                #gen_loss.backward()
 
                 gen_updates += step(optim_params, gen_optimizer, current_iter, gen_loss)
 
@@ -195,8 +199,54 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
 
                 current_iter += 1
 
+            else:
 
 
+                if model_params["update_frequency"] == 1 or (current_iter+1)%model_params["update_frequency"] != 0:
+                    for p in generator.parameters():
+                        p.requires_grad = False
+
+                    dis_loss = - utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
+                    epoch_dis_loss.append(dis_loss.item())
+                    postfix_kwargs["DISLOSS"] = dis_loss.item()
+                    if model_params["gradient_penalty"] != 0:
+                        penalty = discriminator.get_penalty(x_true.data, x_gen.data)
+                        dis_loss += penalty * model_params["gradient_penalty"]
+
+                    dis_optimizer.zero_grad()
+
+                    step(optim_params, dis_optimizer, current_iter, dis_loss, retain_graph=True if model_params["update_frequency"] == 1 else False)
+
+                    if model_params["mode"] == "wgan" and model_params["gradient_penalty"] == 0.0:
+                        for p in discriminator.parameters():
+                            p.data.clamp_(-model_params["clip"], model_params["clip"])
+
+                    for p in generator.parameters():
+                        p.requires_grad = True
+
+                if model_params["update_frequency"] == 1 or (current_iter+1)%model_params["update_frequency"] == 0:
+                    for p in discriminator.parameters():
+                        p.requires_grad = False
+
+                    gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
+                    epoch_gen_loss.append(gen_loss.item())
+                    postfix_kwargs["GENLOSS"] = gen_loss.item()
+                    gen_optimizer.zero_grad()
+
+                    step(optim_params, gen_optimizer, current_iter, gen_loss)
+
+                    for p in discriminator.parameters():
+                        p.requires_grad = True
+
+                    gen_updates += 1
+
+                postfix_kwargs["GEN_UPDATE"] = "{}/{}".format(gen_updates, model_params["num_iter"])
+
+                current_iter += 1
+
+            loop.set_postfix(**postfix_kwargs)
+
+        wandb.log({"DISLOSS": np.average(epoch_dis_loss), "GENLOSS": np.average(epoch_gen_loss)})
 
         epoch += 1
 
@@ -382,10 +432,11 @@ if __name__ == "__main__":
 
     print("CURRENT WORKING DIRECTORY: {}".format(os.getcwd()))
 
-    with open("../config/default_dcgan_wgangp_optimisticextraadam.json") as f:
+    with open("../config/default_dcgan_wgangp_adam1.json") as f:
         all_params = json.load(f)
 
-    all_params["optimizer_params"] = retrieve_line_search_paper_parameters()[2]
+    # all_params["optimizer_params"] = retrieve_line_search_paper_parameters()[2]
+    all_params["model_params"]["update_frequency"] = 5
     wandb.init(project='optimproj', config=all_params)
     print(json.dumps(all_params["optimizer_params"], indent=4))
     run_config(all_params, "cifar10", "testexperiment")
