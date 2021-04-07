@@ -2,6 +2,25 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="b2250d5d-c9e9-4cc8-85d9-0406ccb49179" name="Default Changelist" comment="">
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165447-b7vscg0t/files/config.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165447-b7vscg0t/files/media/graph/graph_0_summary_d89e0be3.graph.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165447-b7vscg0t/files/output.log" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165447-b7vscg0t/files/requirements.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165447-b7vscg0t/files/wandb-metadata.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165447-b7vscg0t/files/wandb-summary.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165447-b7vscg0t/logs/debug-internal.log" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165447-b7vscg0t/logs/debug.log" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165447-b7vscg0t/run-b7vscg0t.wandb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165643-26hrqmzw/files/config.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165643-26hrqmzw/files/media/graph/graph_0_summary_7b36c74f.graph.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165643-26hrqmzw/files/output.log" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165643-26hrqmzw/files/requirements.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165643-26hrqmzw/files/wandb-metadata.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165643-26hrqmzw/files/wandb-summary.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165643-26hrqmzw/logs/debug-internal.log" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165643-26hrqmzw/logs/debug.log" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/wandb/run-20210406_165643-26hrqmzw/run-26hrqmzw.wandb" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/config/default_dcgan_wgan_adam1.json" beforeDir="false" afterPath="$PROJECT_DIR$/config/default_dcgan_wgan_adam1.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/config/default_dcgan_wgan_adam5.json" beforeDir="false" afterPath="$PROJECT_DIR$/config/default_dcgan_wgan_adam5.json" afterDir="false" />
@@ -143,7 +162,7 @@
       <workItem from="1613701785857" duration="1300000" />
       <workItem from="1613888222830" duration="32305000" />
       <workItem from="1615686557289" duration="22878000" />
-      <workItem from="1617367926220" duration="68959000" />
+      <workItem from="1617367926220" duration="69398000" />
     </task>
     <servers />
   </component>
