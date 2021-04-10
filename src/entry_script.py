@@ -1,4 +1,3 @@
-import argparse
 import torchvision.transforms as transforms
 import torchvision
 import torch
@@ -14,11 +13,69 @@ import tqdm
 import wandb
 
 from torch.autograd import Variable
+from torch.nn import functional as F
 
 from models.dcgan import DCGAN32Generator, DCGAN32Discriminator
 from models.resnet import ResNet32Generator, ResNet32Discriminator
+from scipy.stats import entropy
 
 
+def inception_score(imgs, cuda=True, batch_size=32, resize=False, splits=1):
+    """Computes the inception score of the generated images imgs
+    imgs -- Torch dataset of (3xHxW) numpy images normalized in the range [-1, 1]
+    cuda -- whether or not to run on GPU
+    batch_size -- batch size for feeding into Inception v3
+    splits -- number of splits
+    """
+    N = len(imgs)
+
+    assert batch_size > 0
+    assert N > batch_size
+
+    # Set up dtype
+    if cuda:
+        dtype = torch.cuda.FloatTensor
+    else:
+        if torch.cuda.is_available():
+            print("WARNING: You have a CUDA device, so you should probably set cuda=True")
+        dtype = torch.FloatTensor
+
+    # Set up dataloader
+    dataloader = torch.utils.data.DataLoader(imgs, batch_size=batch_size)
+
+    # Load inception model
+    inception_model = torchvision.models.inception_v3(pretrained=True, transform_input=False).type(dtype)
+    inception_model.eval()
+    up = torch.nn.Upsample(size=(299, 299), mode='bilinear').type(dtype)
+    def get_pred(x):
+        if resize:
+            x = up(x)
+        x = inception_model(x)
+        return F.softmax(x).data.cpu().numpy()
+
+    # Get predictions
+    preds = np.zeros((N, 1000))
+
+    for i, batch in enumerate(dataloader, 0):
+        batch = batch.type(dtype)
+        batchv = Variable(batch)
+        batch_size_i = batch.size()[0]
+
+        preds[i*batch_size:i*batch_size + batch_size_i] = get_pred(batchv)
+
+    # Now compute the mean kl-div
+    split_scores = []
+
+    for k in range(splits):
+        part = preds[k * (N // splits): (k+1) * (N // splits), :]
+        py = np.mean(part, axis=0)
+        scores = []
+        for i in range(part.shape[0]):
+            pyx = part[i, :]
+            scores.append(entropy(pyx, py))
+        split_scores.append(np.exp(np.mean(scores)))
+
+    return np.mean(split_scores), np.std(split_scores)
 
 
 def retrieve_optimizer(opt_dict,
@@ -153,10 +210,10 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
                         p.data.clamp_(-model_params["CLIP"], model_params["CLIP"])
 
             x_gen = generator(z)
-            p_true, p_gen = discriminator(x_true), discriminator(x_gen)
+
 
             if optim_params["name"] != "adam" and optim_params["name"] != "adaptive_first":
-
+                p_true, p_gen = discriminator(x_true), discriminator(x_gen)
                 gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
                 dis_loss = - gen_loss.clone()
 
@@ -206,6 +263,7 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
                     for p in generator.parameters():
                         p.requires_grad = False
 
+                    p_true, p_gen = discriminator(x_true), discriminator(x_gen)
                     dis_loss = - utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
                     epoch_dis_loss.append(dis_loss.item())
                     postfix_kwargs["DISLOSS"] = dis_loss.item()
@@ -228,6 +286,7 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
                     for p in discriminator.parameters():
                         p.requires_grad = False
 
+                    p_true, p_gen = discriminator(x_true), discriminator(x_gen)
                     gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
                     epoch_gen_loss.append(gen_loss.item())
                     postfix_kwargs["GENLOSS"] = gen_loss.item()
@@ -246,9 +305,23 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
 
             loop.set_postfix(**postfix_kwargs)
 
-        wandb.log({"DISLOSS": np.average(epoch_dis_loss), "GENLOSS": np.average(epoch_gen_loss)})
+        if epoch % model_params["evaluate_frequency"] == 0:
+            torch.cuda.empty_cache()
+            fake_images = utils.sample(model_params["distribution"], (model_params["num_samples"], model_params["num_latent"])).to(device=device)
+            fake_images = utils.unormalize(generator(fake_images).cpu().data)
+            inc_is = inception_score(fake_images, resize=True)
+
+            ex_arr = utils.sample(model_params["distribution"], (100, model_params["num_latent"]))
+            ex_images = utils.unormalize(ex_arr)
+            wandb.log({"EPOCH_DISLOSS": np.average(epoch_dis_loss),
+                       "EPOCH_GENLOSS": np.average(epoch_gen_loss),
+                       "INCEPTION_SCORE": inc_is,
+                       "examples": [wandb.Image(utils.image_data(ex_images.data, 10), caption=f"Epoch {epoch * 10} examples")]})
+        else:
+            wandb.log({"DISLOSS": np.average(epoch_dis_loss), "GENLOSS": np.average(epoch_gen_loss)})
 
         epoch += 1
+
 
 
 def run_config(all_params, dataset: str, experiment_name: str):
@@ -294,7 +367,7 @@ def run_config(all_params, dataset: str, experiment_name: str):
         print(f"Making output directory {output_dir}")
         os.makedirs(output_dir, exist_ok=True)
 
-    setup_dirs()
+    #setup_dirs()
 
 
     def get_dataset(name: str, train: bool):
@@ -425,7 +498,7 @@ def retrieve_line_search_paper_parameters():
 
 if __name__ == "__main__":
 
-    #torch.autograd.set_detect_anomaly(True)
+    torch.autograd.set_detect_anomaly(True)
     if not torch.cuda.is_available():
         print("CUDA is not enabled; enable CUDA for pytorch in order to run script")
         exit()
@@ -435,8 +508,13 @@ if __name__ == "__main__":
     with open("../config/default_dcgan_wgangp_adam1.json") as f:
         all_params = json.load(f)
 
+    all_params["model_params"]["num_samples"] = 1000
+    all_params["model_params"]["evaluate_frequency"] = 1
+    wandb.init(project='optimproj', config=all_params, mode="disabled")
+
     # all_params["optimizer_params"] = retrieve_line_search_paper_parameters()[2]
     all_params["model_params"]["update_frequency"] = 5
-    wandb.init(project='optimproj', config=all_params)
     print(json.dumps(all_params["optimizer_params"], indent=4))
+
+
     run_config(all_params, "cifar10", "testexperiment")

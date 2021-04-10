@@ -1,7 +1,13 @@
-import torch
+
 import torch.autograd as autograd
 import torch.nn as nn
 import numpy as np
+
+from typing import Union, Optional, List, Tuple, Text, BinaryIO
+import pathlib
+from torchvision.utils import make_grid
+import torch
+irange = range
 
 def clip_weights(params, clip=0.01):
     for p in params:
@@ -40,3 +46,21 @@ def compute_gan_loss(p_true, p_gen, mode='gan', gen_flag=False):
         raise NotImplementedError()
 
     return loss
+
+
+def image_data(
+    tensor: Union[torch.Tensor, List[torch.Tensor]],
+    nrow: int = 8,
+    padding: int = 2,
+    normalize: bool = False,
+    range: Optional[Tuple[int, int]] = None,
+    scale_each: bool = False,
+    pad_value: int = 0,
+) -> None:
+    from PIL import Image
+    grid = make_grid(tensor, nrow=nrow, padding=padding, pad_value=pad_value,
+                     normalize=normalize, range=range, scale_each=scale_each)
+    # Add 0.5 after unnormalizing to [0, 255] to round to nearest integer
+    ndarr = grid.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
+    im = Image.fromarray(ndarr)
+    return im
