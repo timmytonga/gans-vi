@@ -506,38 +506,38 @@ if __name__ == "__main__":
 
     print("CURRENT WORKING DIRECTORY: {}".format(os.getcwd()))
 
-    for file_name in os.listdir("../config"):
-
-        with open(os.path.join("../config", file_name)) as f:
+    for opt in retrieve_line_search_paper_parameters():
+        with open("../config/default_dcgan_wgangp_pastextraadam.json") as f:
             all_params = json.load(f)
 
-        for opt in retrieve_line_search_paper_parameters():
-            wandb.init(entity="optimproject", project='optimproj', config=all_params, mode="disabled")
-            with open("../config/default_dcgan_wgangp_pastextraadam.json") as f:
-                all_params = json.load(f)
+        all_params["model_params"]["num_samples"] = 10000
+        all_params["model_params"]["evaluate_frequency"] = 10
 
-            all_params["model_params"]["num_samples"] = 10000
-            all_params["model_params"]["evaluate_frequency"] = 1
+        all_params["optimizer_params"] = opt
+        all_params["model_params"]["update_frequency"] = 5
 
-            all_params["optimizer_params"] = opt
-            all_params["model_params"]["update_frequency"] = 5
+        print(json.dumps(all_params, indent=4))
 
-            print(json.dumps(all_params, indent=4))
+        run = wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True)
 
-            run_config(all_params, "cifar10", "textexperiment")
+        run_config(all_params, "cifar10", "textexperiment")
+
+        run.finish()
+
+    # for file_name in os.listdir("../config"):
 
         # if all_params["model_params"]["model"] != "resnet":
         #     if all_params["model_params"]["gradient_penalty"] != 0.0:
         #         all_params["model_params"]["num_samples"] = 1000
         #         all_params["model_params"]["evaluate_frequency"] = 10
         #
-        #         wandb.init(entity="optimproject", project='optimproj', config=all_params, mode="disabled")
-        #
         #
         #         if all_params["optimizer_params"]["name"] == "adam":
         #             all_params["model_params"]["update_frequency"] = 5
         #
         #         print(json.dumps(all_params, indent=4))
+        #           wandb.init(entity="optimproject", project='optimproj', config=all_params, mode="disabled")
+
         #         run_config(all_params, "cifar10", "testexperiment")
         #
         #         print("\n\n")
