@@ -313,10 +313,11 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
 
             ex_arr = utils.sample(model_params["distribution"], (100, model_params["num_latent"]))
             ex_images = utils.unormalize(ex_arr)
-            wandb.log({"EPOCH_DISLOSS": np.average(epoch_dis_loss),
-                       "EPOCH_GENLOSS": np.average(epoch_gen_loss),
-                       "INCEPTION_SCORE": inc_is,
-                       "examples": [wandb.Image(utils.image_data(ex_images.data, 10), caption=f"Epoch {epoch * 10} examples")]})
+            wlogdic = {"DISLOSS": np.average(epoch_dis_loss),
+                       "GENLOSS": np.average(epoch_gen_loss),
+                       "INCEPTION_SCORE": inc_is[0],
+                       "examples": [wandb.Image(utils.image_data(ex_images.data, 10), caption=f"Epoch {epoch} examples")]}
+            wandb.log(wlogdic)
         else:
             wandb.log({"DISLOSS": np.average(epoch_dis_loss), "GENLOSS": np.average(epoch_gen_loss)})
 
@@ -498,23 +499,48 @@ def retrieve_line_search_paper_parameters():
 
 if __name__ == "__main__":
 
-    torch.autograd.set_detect_anomaly(True)
+    #torch.autograd.set_detect_anomaly(True)
     if not torch.cuda.is_available():
         print("CUDA is not enabled; enable CUDA for pytorch in order to run script")
         exit()
 
     print("CURRENT WORKING DIRECTORY: {}".format(os.getcwd()))
 
-    with open("../config/default_dcgan_wgangp_adam1.json") as f:
-        all_params = json.load(f)
+    for file_name in os.listdir("../config"):
 
-    all_params["model_params"]["num_samples"] = 1000
-    all_params["model_params"]["evaluate_frequency"] = 1
-    wandb.init(project='optimproj', config=all_params, mode="disabled")
+        with open(os.path.join("../config", file_name)) as f:
+            all_params = json.load(f)
 
-    # all_params["optimizer_params"] = retrieve_line_search_paper_parameters()[2]
-    all_params["model_params"]["update_frequency"] = 5
-    print(json.dumps(all_params["optimizer_params"], indent=4))
+        for opt in retrieve_line_search_paper_parameters():
+            wandb.init(entity="optimproject", project='optimproj', config=all_params, mode="disabled")
+            with open("../config/default_dcgan_wgangp_pastextraadam.json") as f:
+                all_params = json.load(f)
+
+            all_params["model_params"]["num_samples"] = 10000
+            all_params["model_params"]["evaluate_frequency"] = 1
+
+            all_params["optimizer_params"] = opt
+            all_params["model_params"]["update_frequency"] = 5
+
+            print(json.dumps(all_params, indent=4))
+
+            run_config(all_params, "cifar10", "textexperiment")
+
+        # if all_params["model_params"]["model"] != "resnet":
+        #     if all_params["model_params"]["gradient_penalty"] != 0.0:
+        #         all_params["model_params"]["num_samples"] = 1000
+        #         all_params["model_params"]["evaluate_frequency"] = 10
+        #
+        #         wandb.init(entity="optimproject", project='optimproj', config=all_params, mode="disabled")
+        #
+        #
+        #         if all_params["optimizer_params"]["name"] == "adam":
+        #             all_params["model_params"]["update_frequency"] = 5
+        #
+        #         print(json.dumps(all_params, indent=4))
+        #         run_config(all_params, "cifar10", "testexperiment")
+        #
+        #         print("\n\n")
 
 
-    run_config(all_params, "cifar10", "testexperiment")
+
