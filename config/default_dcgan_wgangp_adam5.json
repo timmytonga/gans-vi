@@ -13,7 +13,8 @@
         "distribution": "normal",
         "initialization": "normal",
         "num_filters_gen": 64,
-        "num_filters_dis": 64
+        "num_filters_dis": 64,
+        "update_frequency": 5
     },
     "optimizer_params": {
         "beta2": 0.9,

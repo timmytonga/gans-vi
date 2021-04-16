@@ -11,6 +11,7 @@ import optimizers.adasls.adasls as adasls
 import numpy as np
 import tqdm
 import wandb
+import time
 
 from torch.autograd import Variable
 from torch.nn import functional as F
@@ -185,6 +186,12 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
     epoch = 1
     postfix_kwargs = {}
 
+    gen_param_avg = []
+    for i, param in enumerate(generator.parameters()):
+        gen_param_avg.append(param.data.clone())
+
+
+    begin_time = time.time()
     while gen_updates < model_params["num_iter"]:
         penalty = Variable(torch.Tensor([0.]))
         penalty = penalty.to(device=device)
@@ -242,6 +249,9 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
 
                 gen_updates += step(optim_params, gen_optimizer, current_iter, gen_loss)
 
+                for param_i, param in enumerate(generator.parameters()):
+                    gen_param_avg[param_i] = gen_param_avg[param_i] * gen_updates / (gen_updates + 1.) + param.data.clone() / (gen_updates + 1.)
+
                 for p in discriminator.parameters():
                     p.requires_grad = True
 
@@ -260,7 +270,6 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
 
                     p_true, p_gen = discriminator(x_true), discriminator(x_gen)
                     dis_loss = - utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
-                    epoch_dis_loss.append(dis_loss.item())
                     postfix_kwargs["DISLOSS"] = dis_loss.item()
                     if model_params["gradient_penalty"] != 0:
                         penalty = discriminator.get_penalty(x_true.data, x_gen.data)
@@ -283,11 +292,13 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
 
                     p_true, p_gen = discriminator(x_true), discriminator(x_gen)
                     gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
-                    epoch_gen_loss.append(gen_loss.item())
                     postfix_kwargs["GENLOSS"] = gen_loss.item()
                     gen_optimizer.zero_grad()
 
                     step(optim_params, gen_optimizer, current_iter, gen_loss)
+
+                    for param_i, param in enumerate(generator.parameters()):
+                        gen_param_avg[param_i] = gen_param_avg[param_i] * gen_updates / (gen_updates + 1.) + param.data.clone()/(gen_updates + 1.)
 
                     for p in discriminator.parameters():
                         p.requires_grad = True
@@ -301,7 +312,6 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
             loop.set_postfix(**postfix_kwargs)
 
             if gen_updates % model_params["evaluate_frequency"] == 0:
-                torch.cuda.empty_cache()
                 fake_images = utils.sample(model_params["distribution"], (model_params["num_samples"], model_params["num_latent"])).to(device=device)
                 fake_images = utils.unormalize(generator(fake_images).cpu().data)
                 inc_is = inception_score(fake_images, resize=True)
@@ -309,11 +319,12 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
                 ex_arr = generator(utils.sample(model_params["distribution"], (100, model_params["num_latent"])).to(device=device))
                 ex_images = utils.unormalize(ex_arr)
                 wlogdic = {"INCEPTION_SCORE": inc_is[0],
-                           "examples": [wandb.Image(utils.image_data(ex_images.data, 10), caption=f"Epoch {epoch} examples")]}
+                           "PASSED_TIME": time.time() - begin_time,
+                           "examples": [wandb.Image(utils.image_data(ex_images.data, 10), caption=f"GEN_UPDATE {gen_updates} examples")]}
                 wandb.log(wlogdic)
 
-        if epoch % 100 == 0:
-            torch.save(generator.state_dict(), os.path.join(wandb.run.dir, "gen.ckpt"))
+        if epoch % 1000 == 0:
+            torch.save({"gen_params_avg": gen_param_avg}, os.path.join(wandb.run.dir, "gen_e{}.ckpt".format(epoch)))
 
 
         epoch += 1
@@ -525,12 +536,9 @@ if __name__ == "__main__":
             all_params = json.load(f)
         if all_params["model_params"]["model"] != "resnet":
             if all_params["model_params"]["gradient_penalty"] != 0.0:
-                all_params["model_params"]["num_samples"] = 10000
-                all_params["model_params"]["evaluate_frequency"] = 10
+                all_params["model_params"]["num_samples"] = 1000
+                all_params["model_params"]["evaluate_frequency"] = 1
                 all_params["model_params"]["num_iter"] = 100000
-
-                if all_params["optimizer_params"]["name"] == "adam":
-                    all_params["model_params"]["update_frequency"] = 5
 
                 print(json.dumps(all_params, indent=4))
                 with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
