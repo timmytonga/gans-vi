@@ -1,6 +1,6 @@
 {
     "model_params": {
-        "batch_size": 64,
+        "batch_size": 128,
         "model": "dcgan",
         "num_iter": 500000,
         "ema": 0.9999,

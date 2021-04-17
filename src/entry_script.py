@@ -191,8 +191,6 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
         loop = tqdm.tqdm(enumerate(trainloader), total=len(trainloader), leave=False)
 
         loop.set_description(f"EPOCH: {epoch}")
-        epoch_dis_loss = []
-        epoch_gen_loss = []
         for i, data in loop:
             x_true, _ = data
             x_true = torch.autograd.Variable(x_true)
@@ -220,9 +218,6 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
                 postfix_kwargs = {"GEN_UPDATE":"{}/{}".format(gen_updates, model_params["num_iter"]),
                                  "DISLOSS": dis_loss.item(),
                                  "GENLOSS":gen_loss.item()}
-
-                epoch_dis_loss.append(dis_loss.item())
-                epoch_gen_loss.append(gen_loss.item())
 
                 if model_params["gradient_penalty"] != 0:
                     penalty = discriminator.get_penalty(x_true.data, x_gen.data)
@@ -305,21 +300,21 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
 
             loop.set_postfix(**postfix_kwargs)
 
-        if epoch % model_params["evaluate_frequency"] == 0:
-            torch.cuda.empty_cache()
-            fake_images = utils.sample(model_params["distribution"], (model_params["num_samples"], model_params["num_latent"])).to(device=device)
-            fake_images = utils.unormalize(generator(fake_images).cpu().data)
-            inc_is = inception_score(fake_images, resize=True)
+            if gen_updates % model_params["evaluate_frequency"] == 0:
+                torch.cuda.empty_cache()
+                fake_images = utils.sample(model_params["distribution"], (model_params["num_samples"], model_params["num_latent"])).to(device=device)
+                fake_images = utils.unormalize(generator(fake_images).cpu().data)
+                inc_is = inception_score(fake_images, resize=True)
 
-            ex_arr = utils.sample(model_params["distribution"], (100, model_params["num_latent"]))
-            ex_images = utils.unormalize(ex_arr)
-            wlogdic = {"DISLOSS": np.average(epoch_dis_loss),
-                       "GENLOSS": np.average(epoch_gen_loss),
-                       "INCEPTION_SCORE": inc_is[0],
-                       "examples": [wandb.Image(utils.image_data(ex_images.data, 10), caption=f"Epoch {epoch} examples")]}
-            wandb.log(wlogdic)
-        else:
-            wandb.log({"DISLOSS": np.average(epoch_dis_loss), "GENLOSS": np.average(epoch_gen_loss)})
+                ex_arr = generator(utils.sample(model_params["distribution"], (100, model_params["num_latent"])).to(device=device))
+                ex_images = utils.unormalize(ex_arr)
+                wlogdic = {"INCEPTION_SCORE": inc_is[0],
+                           "examples": [wandb.Image(utils.image_data(ex_images.data, 10), caption=f"Epoch {epoch} examples")]}
+                wandb.log(wlogdic)
+
+        if epoch % 100 == 0:
+            torch.save(generator.state_dict(), os.path.join(wandb.run.dir, "gen.ckpt"))
+
 
         epoch += 1
 
@@ -506,41 +501,44 @@ if __name__ == "__main__":
 
     print("CURRENT WORKING DIRECTORY: {}".format(os.getcwd()))
 
-    for opt in retrieve_line_search_paper_parameters():
-        with open("../config/default_dcgan_wgangp_pastextraadam.json") as f:
+    # for opt in retrieve_line_search_paper_parameters():
+    #     with open("../config/default_dcgan_wgangp_pastextraadam.json") as f:
+    #         all_params = json.load(f)
+    #
+    #     all_params["model_params"]["num_samples"] = 10000
+    #     all_params["model_params"]["evaluate_frequency"] = 10
+    #     all_params["model_params"]["num_iter"] = 100000
+    #
+    #     all_params["optimizer_params"] = opt
+    #     all_params["model_params"]["update_frequency"] = 5
+    #
+    #     print(json.dumps(all_params, indent=4))
+    #
+    #     run = wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True)
+    #
+    #     run_config(all_params, "cifar10", "textexperiment")
+    #
+    #     run.finish()
+
+    for file_name in os.listdir("../config"):
+        with open(os.path.join("../config", file_name)) as f:
             all_params = json.load(f)
+        if all_params["model_params"]["model"] != "resnet":
+            if all_params["model_params"]["gradient_penalty"] != 0.0:
+                all_params["model_params"]["num_samples"] = 10000
+                all_params["model_params"]["evaluate_frequency"] = 10
+                all_params["model_params"]["num_iter"] = 100000
 
-        all_params["model_params"]["num_samples"] = 10000
-        all_params["model_params"]["evaluate_frequency"] = 10
+                if all_params["optimizer_params"]["name"] == "adam":
+                    all_params["model_params"]["update_frequency"] = 5
 
-        all_params["optimizer_params"] = opt
-        all_params["model_params"]["update_frequency"] = 5
+                print(json.dumps(all_params, indent=4))
+                with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
+                    wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
+                    run_config(all_params, "cifar10", "testexperiment")
 
-        print(json.dumps(all_params, indent=4))
 
-        run = wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True)
-
-        run_config(all_params, "cifar10", "textexperiment")
-
-        run.finish()
-
-    # for file_name in os.listdir("../config"):
-
-        # if all_params["model_params"]["model"] != "resnet":
-        #     if all_params["model_params"]["gradient_penalty"] != 0.0:
-        #         all_params["model_params"]["num_samples"] = 1000
-        #         all_params["model_params"]["evaluate_frequency"] = 10
-        #
-        #
-        #         if all_params["optimizer_params"]["name"] == "adam":
-        #             all_params["model_params"]["update_frequency"] = 5
-        #
-        #         print(json.dumps(all_params, indent=4))
-        #           wandb.init(entity="optimproject", project='optimproj', config=all_params, mode="disabled")
-
-        #         run_config(all_params, "cifar10", "testexperiment")
-        #
-        #         print("\n\n")
+                print("\n\n")
 
 
 
