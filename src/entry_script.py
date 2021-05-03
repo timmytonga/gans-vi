@@ -172,7 +172,7 @@ def step(opt_params, optimizer, ts, loss, retain_graph=False):
         return 1
 
 
-def runner(trainloader, generator, discriminator, optim_params, output_path, model_params, device):
+def runner(trainloader, generator, discriminator, optim_params, model_params, device):
 
     dis_optimizer, gen_optimizer = retrieve_optimizer(optim_params, generator, discriminator, len(trainloader), model_params["batch_size"])
     print("Training Optimizer ({}) on ({})".format(optim_params["name"], model_params["model"]))
@@ -187,9 +187,10 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
     postfix_kwargs = {}
 
     gen_param_avg = []
+    param_temp_holder = []
     for i, param in enumerate(generator.parameters()):
         gen_param_avg.append(param.data.clone())
-
+        param_temp_holder.append(None)
 
     begin_time = time.time()
     while gen_updates < model_params["num_iter"]:
@@ -313,6 +314,12 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
 
             if gen_updates % model_params["evaluate_frequency"] == 0:
                 fake_images = utils.sample(model_params["distribution"], (model_params["num_samples"], model_params["num_latent"])).to(device=device)
+
+                if optim_params["average"]:
+                    for j, param in enumerate(generator.parameters()):
+                        param_temp_holder[j] = param.data
+                        param.data = gen_param_avg[j]
+
                 fake_images = utils.unormalize(generator(fake_images).cpu().data)
                 inc_is = inception_score(fake_images, resize=True)
 
@@ -322,6 +329,10 @@ def runner(trainloader, generator, discriminator, optim_params, output_path, mod
                            "PASSED_TIME": time.time() - begin_time,
                            "examples": [wandb.Image(utils.image_data(ex_images.data, 10), caption=f"GEN_UPDATE {gen_updates} examples")]}
                 wandb.log(wlogdic)
+
+                if optim_params["average"]:
+                    for j, param in enumerate(generator.parameters()):
+                        param.data = param_temp_holder[j]
 
         if epoch % 1000 == 0:
             torch.save({"gen_params_avg": gen_param_avg}, os.path.join(wandb.run.dir, "gen_e{}.ckpt".format(epoch)))
@@ -417,7 +428,7 @@ def run_config(all_params, dataset: str, experiment_name: str):
     gen.apply(lambda x: utils.weight_init(x, mode=DISTRIBUTION))
     dis.apply(lambda x: utils.weight_init(x, mode=DISTRIBUTION))
 
-    runner(training_set, gen, dis, opt_params, output_dir, model_params, device)
+    runner(training_set, gen, dis, opt_params, model_params, device)
 
 
 def retrieve_line_search_paper_parameters():
@@ -539,6 +550,10 @@ if __name__ == "__main__":
                 all_params["model_params"]["num_samples"] = 1000
                 all_params["model_params"]["evaluate_frequency"] = 1
                 all_params["model_params"]["num_iter"] = 100000
+
+                all_params["optimizer_params"]["average"] = False
+                if all_params["optimizer_params"]["name"] == "adam":
+                    all_params["optimizer_params"]["average"] = False
 
                 print(json.dumps(all_params, indent=4))
                 with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
