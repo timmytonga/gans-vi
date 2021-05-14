@@ -2,3 +2,4 @@ src/datadir/
 src/outdir/
 src/wandb/
 .idea/
+src/tflib/

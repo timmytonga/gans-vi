@@ -21,7 +21,21 @@ from models.resnet import ResNet32Generator, ResNet32Discriminator
 from scipy.stats import entropy
 
 
-def inception_score(imgs, cuda=True, batch_size=32, resize=False, splits=1):
+
+# def get_inception_score(gen, n_samples, n_latent, n_channel, resolution, device):
+#     all_samples = []
+#     samples = torch.randn(n_samples, n_latent)
+#     for i in range(0, n_samples, 100):
+#         samples_100 = samples[i:i+100].to(device=device)
+#         all_samples.append(gen(samples_100).cpu().data.numpy())
+#
+#     all_samples = np.concatenate(all_samples, axis=0)
+#     all_samples = np.multiply(np.add(np.multiply(all_samples, 0.5), 0.5), 255).astype('int32')
+#     all_samples = all_samples.reshape((-1, n_channel, resolution, resolution)).transpose(0, 2, 3, 1)
+#     return tflib.inception_score.get_inception_score(list(all_samples))
+
+
+def inception_score(imgs, cuda=True, batch_size=100, resize=False, splits=1):
     """Computes the inception score of the generated images imgs
     imgs -- Torch dataset of (3xHxW) numpy images normalized in the range [-1, 1]
     cuda -- whether or not to run on GPU
@@ -313,15 +327,24 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
             loop.set_postfix(**postfix_kwargs)
 
             if gen_updates % model_params["evaluate_frequency"] == 0:
-                fake_images = utils.sample(model_params["distribution"], (model_params["num_samples"], model_params["num_latent"])).to(device=device)
 
                 if optim_params["average"]:
                     for j, param in enumerate(generator.parameters()):
                         param_temp_holder[j] = param.data
                         param.data = gen_param_avg[j]
 
-                fake_images = utils.unormalize(generator(fake_images).cpu().data)
-                inc_is = inception_score(fake_images, resize=True)
+                all_samples = []
+                samples = torch.randn(model_params["num_samples"], model_params["num_latent"])
+                for i in range(0, model_params["num_samples"], 100):
+                    samples_100 = samples[i:i+100].to(device=device)
+                    all_samples.append(generator(samples_100).cpu().data.numpy())
+
+                all_samples = np.concatenate(all_samples, axis=0)
+                all_samples = np.multiply(np.add(np.multiply(all_samples, 0.5), 0.5), 255).astype('int32')
+                all_samples = all_samples.reshape((-1, 3, 32, 32)).transpose(0, 1, 2, 3)
+
+                inc_is = inception_score(all_samples, resize=True)
+
 
                 ex_arr = generator(utils.sample(model_params["distribution"], (100, model_params["num_latent"])).to(device=device))
                 ex_images = utils.unormalize(ex_arr)
@@ -547,8 +570,8 @@ if __name__ == "__main__":
             all_params = json.load(f)
         if all_params["model_params"]["model"] != "resnet":
             if all_params["model_params"]["gradient_penalty"] != 0.0:
-                all_params["model_params"]["num_samples"] = 1000
-                all_params["model_params"]["evaluate_frequency"] = 1
+                all_params["model_params"]["num_samples"] = 10000
+                all_params["model_params"]["evaluate_frequency"] = 500
                 all_params["model_params"]["num_iter"] = 100000
 
                 all_params["optimizer_params"]["average"] = False
