@@ -76,7 +76,8 @@ def inception_score(imgs, cuda=True, batch_size=100, resize=False, splits=1):
         batchv = Variable(batch)
         batch_size_i = batch.size()[0]
 
-        preds[i*batch_size:i*batch_size + batch_size_i] = get_pred(batchv)
+        with torch.no_grad():
+            preds[i*batch_size:i*batch_size + batch_size_i] = get_pred(batchv)
 
     # Now compute the mean kl-div
     split_scores = []
@@ -570,8 +571,8 @@ if __name__ == "__main__":
             all_params = json.load(f)
         if all_params["model_params"]["model"] != "resnet":
             if all_params["model_params"]["gradient_penalty"] != 0.0:
-                all_params["model_params"]["num_samples"] = 10000
-                all_params["model_params"]["evaluate_frequency"] = 500
+                all_params["model_params"]["num_samples"] = 1000
+                all_params["model_params"]["evaluate_frequency"] = 1
                 all_params["model_params"]["num_iter"] = 100000
 
                 all_params["optimizer_params"]["average"] = False
