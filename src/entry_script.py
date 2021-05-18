@@ -61,6 +61,7 @@ def inception_score(imgs, cuda=True, batch_size=100, resize=False, splits=1):
     # Load inception model
     inception_model = torchvision.models.inception_v3(pretrained=True, transform_input=False).type(dtype)
     inception_model.eval()
+
     up = torch.nn.Upsample(size=(299, 299), mode='bilinear').type(dtype)
     def get_pred(x):
         if resize:
@@ -83,7 +84,7 @@ def inception_score(imgs, cuda=True, batch_size=100, resize=False, splits=1):
     split_scores = []
 
     for k in range(splits):
-        part = preds[k * (N // splits): (k+1) * (N // splits), :]
+        part = preds[k * (N // splits): (k + 1) * (N // splits), :]
         py = np.mean(part, axis=0)
         scores = []
         for i in range(part.shape[0]):
@@ -328,7 +329,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
             loop.set_postfix(**postfix_kwargs)
 
             if gen_updates % model_params["evaluate_frequency"] == 0:
-
+                torch.cuda.empty_cache()
                 if optim_params["average"]:
                     for j, param in enumerate(generator.parameters()):
                         param_temp_holder[j] = param.data
@@ -345,7 +346,6 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                 all_samples = all_samples.reshape((-1, 3, 32, 32)).transpose(0, 1, 2, 3)
 
                 inc_is = inception_score(all_samples, resize=True)
-
 
                 ex_arr = generator(utils.sample(model_params["distribution"], (100, model_params["num_latent"])).to(device=device))
                 ex_images = utils.unormalize(ex_arr)
@@ -385,7 +385,7 @@ def run_config(all_params, dataset: str, experiment_name: str):
     BATCH_NORM_G = True
     BATCH_NORM_D = get_or_error(model_params, "batchnorm_dis")
     N_CHANNEL = 3
-    CUDA = 0
+    CUDA = 1
     if isinstance(CUDA, int):
         device = torch.device(f"cuda:{CUDA}")
     else:
@@ -571,8 +571,8 @@ if __name__ == "__main__":
             all_params = json.load(f)
         if all_params["model_params"]["model"] != "resnet":
             if all_params["model_params"]["gradient_penalty"] != 0.0:
-                all_params["model_params"]["num_samples"] = 1000
-                all_params["model_params"]["evaluate_frequency"] = 1
+                all_params["model_params"]["evaluate_frequency"] = 1000
+                all_params["model_params"]["num_samples"] = 10000
                 all_params["model_params"]["num_iter"] = 100000
 
                 all_params["optimizer_params"]["average"] = False
@@ -580,7 +580,7 @@ if __name__ == "__main__":
                     all_params["optimizer_params"]["average"] = False
 
                 print(json.dumps(all_params, indent=4))
-                with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
+                with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True) as r:
                     wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
                     run_config(all_params, "cifar10", "testexperiment")
 
