@@ -34,12 +34,9 @@ from PIL import Image
 from scipy import linalg
 from torch.nn.functional import adaptive_avg_pool2d
 
-try:
-    from tqdm import tqdm
-except ImportError:
-    # If tqdm is not available, provide a mock version of it
-    def tqdm(x):
-        return x
+
+def tqdm(x):
+    return x
 
 from src.pytorch_fid.inception import InceptionV3
 
