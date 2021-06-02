@@ -181,11 +181,8 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
     dis_optimizer, gen_optimizer = retrieve_optimizer(optim_params, generator, discriminator, len(trainloader), model_params["batch_size"])
     print("Training Optimizer ({}) on ({})".format(optim_params["name"], model_params["model"]))
 
-    N_SAMPLES = 50000
-    RESOLUTION = 32
-    EVAL_FREQ = 10000
-
     gen_updates = 0
+    o_gen_updates = None
     current_iter = 0
     epoch = 1
     postfix_kwargs = {}
@@ -316,7 +313,8 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
             loop.set_postfix(**postfix_kwargs)
 
-            if gen_updates % model_params["evaluate_frequency"] == 0:
+            if gen_updates % model_params["evaluate_frequency"] == 0 and o_gen_updates != gen_updates:
+                o_gen_updates = gen_updates
                 torch.cuda.empty_cache()
                 if optim_params["average"]:
                     for j, param in enumerate(generator.parameters()):
@@ -345,11 +343,16 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                     for j, param in enumerate(generator.parameters()):
                         param.data = param_temp_holder[j]
 
-        if epoch % 1000 == 0:
-            torch.save({"gen_params_avg": gen_param_avg}, os.path.join(wandb.run.dir, "gen_e{}.ckpt".format(epoch)))
-
 
         epoch += 1
+
+    optim_name = optim_params["name"]
+    torch.save({
+        "model_params": generator.state_dict(),
+        "optimizer_params": gen_optimizer.state_dict(),
+        "optim_config": optim_params
+    }, os.path.join("outdir", f"gen_params_{optim_name}_{int(begin_time)}.ckpt"))
+    # wandb.save(os.path.join("outdir", "gen_params.ckpt"))
 
 
 
@@ -372,7 +375,7 @@ def run_config(all_params, dataset: str, experiment_name: str):
     BATCH_NORM_G = True
     BATCH_NORM_D = get_or_error(model_params, "batchnorm_dis")
     N_CHANNEL = 3
-    CUDA = 0
+    CUDA = 1
     if isinstance(CUDA, int):
         device = torch.device(f"cuda:{CUDA}")
     else:
@@ -553,13 +556,16 @@ if __name__ == "__main__":
     #
     #     run.finish()
 
+    include = {"default_dcgan_wgangp_extraadam.json"}
     for file_name in os.listdir("../config"):
+        if file_name not in include:
+            continue
         with open(os.path.join("../config", file_name)) as f:
             all_params = json.load(f)
         if all_params["model_params"]["model"] != "resnet":
             if all_params["model_params"]["gradient_penalty"] != 0.0:
-                all_params["model_params"]["evaluate_frequency"] = 1
-                all_params["model_params"]["num_samples"] = 1000
+                all_params["model_params"]["evaluate_frequency"] = 2500
+                all_params["model_params"]["num_samples"] = 50000
                 all_params["model_params"]["num_iter"] = 100000
 
                 all_params["optimizer_params"]["average"] = False
@@ -567,7 +573,7 @@ if __name__ == "__main__":
                     all_params["optimizer_params"]["average"] = False
 
                 print(json.dumps(all_params, indent=4))
-                with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
+                with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True) as r:
                     wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
                     run_config(all_params, "cifar10", "testexperiment")
 
