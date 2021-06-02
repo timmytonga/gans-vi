@@ -8,6 +8,7 @@ import json
 import optimizers.optim.extragradient as ExtraGradient
 import optimizers.optim.omd as OMD
 import optimizers.adasls.adasls as adasls
+import optimizers.optim.adapeg as AdaPEG
 import numpy as np
 import tqdm
 import wandb
@@ -97,6 +98,17 @@ def retrieve_optimizer(opt_dict,
         gen_optimizer = ExtraGradient.ExtraAdam(generator.parameters(),
                                                 lr=opt_dict["learning_rate_gen"],
                                                 betas=(opt_dict["beta1"], opt_dict["beta2"]))
+    elif opt_dict["name"] == "adapeg":
+        dis_optimizer = AdaPEG.AdaPEGAdam(discriminator.parameters(),
+                                          lr=opt_dict["learning_rate_dis"],
+                                          betas=(opt_dict["beta1"], opt_dict["beta2"]),
+                                          squared_grad=opt_dict["squared_grad"],
+                                          optimistic=opt_dict["optimistic"])
+        gen_optimizer = AdaPEG.AdaPEGAdam(generator.parameters(),
+                                          lr=opt_dict["learning_rate_gen"],
+                                          betas=(opt_dict["beta1"], opt_dict["beta2"]),
+                                          squared_grad=opt_dict["squared_grad"],
+                                          optimistic=opt_dict["optimistic"])
     elif opt_dict["name"] == "optimisticadam":
         dis_optimizer = OMD.OptimisticAdam(discriminator.parameters(),
                                            lr=opt_dict["learning_rate_dis"],
@@ -152,7 +164,7 @@ def retrieve_optimizer(opt_dict,
                      mom_type=opt_dict.get('mom_type', "standard"),
                      )
     else:
-        raise AssertionError("Failed to retrieve optimizer: No optimizer of name: {}", opt_dict["name"])
+        raise AssertionError("Failed to retrieve optimizer: No optimizer of name {}", opt_dict["name"])
 
     return dis_optimizer, gen_optimizer
 
@@ -166,7 +178,7 @@ def step(opt_params, optimizer, ts, loss, retain_graph=False):
         else:
             optimizer.step()
             return 1
-    elif opt_params["name"] == "pastadam" or opt_params["name"] == "optimisticadam" or opt_params["name"] == "adam":
+    elif opt_params["name"] == "pastadam" or opt_params["name"] == "optimisticadam" or opt_params["name"] == "adam" or opt_params["name"] == "adapeg":
         loss.backward(retain_graph=retain_graph)
         optimizer.step()
         return 1
@@ -174,6 +186,8 @@ def step(opt_params, optimizer, ts, loss, retain_graph=False):
         closure = lambda: loss
         optimizer.step(closure=closure, retain_graph=retain_graph)
         return 1
+    else:
+        raise RuntimeError("Could not find step procedure for optimizer {}".format(opt_params["name"]))
 
 
 def runner(trainloader, generator, discriminator, optim_params, model_params, device):
@@ -525,6 +539,43 @@ def retrieve_line_search_paper_parameters():
     return opt_list + adaptive_first_sls_lipschitz_list + adaptive_first_sls_lipschitz_list + adaptive_first_sps_list
 
 
+def get_adapeg_params():
+    params = {
+        "model_params": {
+            "batch_size": 64,
+            "model": "dcgan",
+            "num_iter": 500000,
+            "ema": 0.9999,
+            "num_latent": 128,
+            "batchnorm_dis": False,
+            "optimizer": "adam",
+            "clip": 0.01,
+            "gradient_penalty": 10,
+            "mode": "wgan",
+            "seed": 1318,
+            "distribution": "normal",
+            "initialization": "normal",
+            "num_filters_gen": 64,
+            "num_filters_dis": 64
+        },
+        "optimizer_params": []
+    }
+
+    optim_param_base = {
+        "name": "adapeg",
+        "learning_rate_dis":5e-04,
+        "learning_rate_gen":5e-04,
+        "beta2":0.9,
+        "beta1":0.5,
+        "squared_grad": True,
+        "optimistic": True
+    }
+
+    params["optimizer_params"].append(optim_param_base)
+
+    return params
+
+
 if __name__ == "__main__":
 
     #torch.autograd.set_detect_anomaly(True)
@@ -553,26 +604,36 @@ if __name__ == "__main__":
     #
     #     run.finish()
 
-    for file_name in os.listdir("../config"):
-        with open(os.path.join("../config", file_name)) as f:
-            all_params = json.load(f)
-        if all_params["model_params"]["model"] != "resnet":
-            if all_params["model_params"]["gradient_penalty"] != 0.0:
-                all_params["model_params"]["evaluate_frequency"] = 1
-                all_params["model_params"]["num_samples"] = 1000
-                all_params["model_params"]["num_iter"] = 100000
+    all_params = get_adapeg_params()
 
-                all_params["optimizer_params"]["average"] = False
-                if all_params["optimizer_params"]["name"] == "adam":
-                    all_params["optimizer_params"]["average"] = False
+    all_params["model_params"]["evaluate_frequency"] = 1
+    all_params["model_params"]["num_samples"] = 1000
+    all_params["model_params"]["num_iter"] = 100000
 
-                print(json.dumps(all_params, indent=4))
-                with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
-                    wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
-                    run_config(all_params, "cifar10", "testexperiment")
+    all_params["optimizer_params"]["average"] = False
+    with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
+        run_config(all_params, "cifar10", "testexperiment")
 
-
-                print("\n\n")
+    # for file_name in os.listdir("../config"):
+    #     with open(os.path.join("../config", file_name)) as f:
+    #         all_params = json.load(f)
+    #     if all_params["model_params"]["model"] != "resnet":
+    #         if all_params["model_params"]["gradient_penalty"] != 0.0:
+    #             all_params["model_params"]["evaluate_frequency"] = 1
+    #             all_params["model_params"]["num_samples"] = 1000
+    #             all_params["model_params"]["num_iter"] = 100000
+    #
+    #             all_params["optimizer_params"]["average"] = False
+    #             if all_params["optimizer_params"]["name"] == "adam":
+    #                 all_params["optimizer_params"]["average"] = False
+    #
+    #             print(json.dumps(all_params, indent=4))
+    #             with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
+    #                 wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
+    #                 run_config(all_params, "cifar10", "testexperiment")
+    #
+    #
+    #             print("\n\n")
 
 
 
