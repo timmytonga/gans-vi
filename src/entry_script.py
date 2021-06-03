@@ -609,12 +609,18 @@ if __name__ == "__main__":
 
 
     all_params = get_adapeg_params()
-    all_params["model_params"]["evaluate_frequency"] = 2500
-    all_params["model_params"]["num_samples"] = 50000
-    all_params["model_params"]["num_iter"] = 100000
-    all_params["optimizer_params"]["average"] = False
-    with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
-        run_config(all_params, "cifar10", "testexperiment")
+    for opt_i in all_params["optimizer_params"]:
+        inner_params = {}
+        inner_params["model_params"] = all_params["model_params"]
+        inner_params["optimizer_params"] = opt_i
+
+
+        all_params["model_params"]["evaluate_frequency"] = 2500
+        all_params["model_params"]["num_samples"] = 50000
+        all_params["model_params"]["num_iter"] = 100000
+        all_params["optimizer_params"]["average"] = False
+        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
+            run_config(inner_params, "cifar10", "testexperiment")
 
     # include = {"default_dcgan_wgangp_extraadam.json"}
     # for file_name in os.listdir("../config"):
