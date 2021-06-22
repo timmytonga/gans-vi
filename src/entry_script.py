@@ -564,17 +564,31 @@ def get_adapeg_params():
         "optimizer_params": []
     }
 
-    optim_param_base = {
-        "name": "adapeg",
-        "learning_rate_dis":5e-04,
-        "learning_rate_gen":5e-04,
-        "beta2":0.9,
-        "beta1":0.5,
-        "squared_grad": True,
-        "optimistic": True
-    }
+    for lr in [0.0001, 0.00001]:
+        optim_param_base = {
+            "name": "adapeg",
+            "learning_rate_dis":lr,
+            "learning_rate_gen":lr,
+            "beta2":0.9,
+            "beta1":0.5,
+            "squared_grad": True,
+            "optimistic": False
+        }
 
-    params["optimizer_params"].append(optim_param_base)
+        params["optimizer_params"].append(optim_param_base)
+
+    for lr in [0.001, 0.00001]:
+        optim_param_base = {
+            "name": "adapeg",
+            "learning_rate_dis": lr,
+            "learning_rate_gen": lr,
+            "beta2": 0.9,
+            "beta1": 0.5,
+            "squared_grad": True,
+            "optimistic": True
+        }
+
+        params["optimizer_params"].append(optim_param_base)
 
     return params
 
@@ -615,14 +629,15 @@ if __name__ == "__main__":
         inner_params["optimizer_params"] = opt_i
 
 
-        all_params["model_params"]["evaluate_frequency"] = 2500
-        all_params["model_params"]["num_samples"] = 50000
-        all_params["model_params"]["num_iter"] = 100000
-        all_params["optimizer_params"]["average"] = False
-        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
+        inner_params["model_params"]["evaluate_frequency"] = 2500
+        inner_params["model_params"]["num_samples"] = 50000
+        inner_params["model_params"]["num_iter"] = 100000
+        inner_params["optimizer_params"]["average"] = False
+        print(json.dumps(inner_params, indent=4))
+        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
             run_config(inner_params, "cifar10", "testexperiment")
 
-    # include = {"default_dcgan_wgangp_extraadam.json"}
+    # include = {"default_dcgan_wgangp_optimisticextraadam.json"}
     # for file_name in os.listdir("../config"):
     #     if file_name not in include:
     #         continue
@@ -634,6 +649,8 @@ if __name__ == "__main__":
     #             all_params["model_params"]["num_samples"] = 50000
     #             all_params["model_params"]["num_iter"] = 100000
     #
+    #             all_params["optimizer_params"]["learning_rate_dis"] = 0.0009
+    #             all_params["optimizer_params"]["learning_rate_gen"] = 0.0009
     #             all_params["optimizer_params"]["average"] = False
     #             if all_params["optimizer_params"]["name"] == "adam":
     #                 all_params["optimizer_params"]["average"] = False
