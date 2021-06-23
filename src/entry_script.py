@@ -9,6 +9,7 @@ import optimizers.optim.extragradient as ExtraGradient
 import optimizers.optim.omd as OMD
 import optimizers.adasls.adasls as adasls
 import optimizers.optim.adapeg as AdaPEG
+import optimizers.optim.torch_svg as SVRG
 import numpy as np
 import tqdm
 import wandb
@@ -21,7 +22,7 @@ from models.dcgan import DCGAN32Generator, DCGAN32Discriminator
 from models.resnet import ResNet32Generator, ResNet32Discriminator
 from scipy.stats import entropy
 from src.pytorch_fid.fid import calculate_fid_given_paths
-
+from src.optimizers.optim.run_vr import recalibrate
 
 
 def inception_score(imgs, cuda=True, batch_size=100, resize=False, splits=1):
@@ -123,6 +124,21 @@ def retrieve_optimizer(opt_dict,
         gen_optimizer = torch.optim.Adam(generator.parameters(),
                                          lr=opt_dict["learning_rate_gen"],
                                          betas=(opt_dict["beta1"], opt_dict["beta2"]))
+    elif opt_dict["name"] == "svrg":
+        dis_optimizer = SVRG.SVRG(discriminator.parameters(),
+                                  vr_from_epoch=opt_dict["vr_after"],
+                                  nbatches=n_train,
+                                  lr=opt_dict["learning_rate_dis"],
+                                  momentum=opt_dict["momentum"],
+                                  weight_decay=opt_dict["weight_decay"])
+
+        gen_optimizer = SVRG.SVRG(generator.parameters(),
+                                  vr_from_epoch=opt_dict["vr_after"],
+                                  nbatches=n_train,
+                                  lr=opt_dict["learning_rate_gen"],
+                                  momentum=opt_dict["momentum"],
+                                  weight_decay=opt_dict["weight_decay"])
+
     elif opt_name == "adaptive_first":
 
         gen_optimizer = adasls.AdaSLS(generator.parameters(),
@@ -169,7 +185,7 @@ def retrieve_optimizer(opt_dict,
     return dis_optimizer, gen_optimizer
 
 
-def step(opt_params, optimizer, ts, loss, retain_graph=False):
+def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=False):
     if opt_params["name"] == "extraadam":
         loss.backward(retain_graph=retain_graph)
         if (ts + 1) % 2 != 0:
@@ -186,6 +202,35 @@ def step(opt_params, optimizer, ts, loss, retain_graph=False):
         closure = lambda: loss
         optimizer.step(closure=closure, retain_graph=retain_graph)
         return 1
+    elif opt_params["name"] == "svrg":
+        if opt_params["lr_reduction"] == "default":
+            lr = lr * (0.1 ** (epoch // 75))
+        elif opt_params["lr_reduction"] == "none" or opt_params["lr_reduction"] == "False":
+            lr = lr
+        elif opt_params["lr_reduction"] == "150":
+            lr = lr * (0.1 ** (epoch // 150))
+        elif opt_params["lr_reduction"] == "150-225":
+            lr = lr * (0.1 ** (epoch // 150)) * (0.1 ** (epoch // 225))
+        elif opt_params["lr_reduction"] == "up5x-20-down150":
+            if epoch < 20:
+                lr = lr
+            else:
+                lr = 3.0 * lr * (0.1 ** (epoch // 150))
+        elif opt_params["lr_reduction"] == "up30-150-225":
+            if epoch < 30:
+                lr = lr
+            else:
+                lr = 3.0 * lr * (0.1 ** (epoch // 150)) * (0.1 ** (epoch // 225))
+        elif opt_params["lr_reduction"] == "every30":
+            lr = lr * (0.1 ** (epoch // 30))
+
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = lr
+
+        closure = lambda: loss
+        loss.backward(retain_graph=retain_graph)
+        optimizer.step(batch_id, closure)
+
     else:
         raise RuntimeError("Could not find step procedure for optimizer {}".format(opt_params["name"]))
 
@@ -214,6 +259,16 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
         loop = tqdm.tqdm(enumerate(trainloader), total=len(trainloader), leave=False)
 
         loop.set_description(f"EPOCH: {epoch}")
+        if optim_params["name"] == "svrg":
+            if epoch >= 1:
+                recalibrate(model_params=model_params,
+                            train_loader=trainloader,
+                            generator=generator,
+                            discriminator=discriminator,
+                            gen_optimizer=gen_optimizer,
+                            dis_optimizer=dis_optimizer,
+                            device=device)
+
         for i, data in loop:
             x_true, _ = data
             x_true = torch.autograd.Variable(x_true)
@@ -233,7 +288,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
             x_gen = generator(z)
 
 
-            if optim_params["name"] != "adam" and optim_params["name"] != "adaptive_first":
+            if optim_params["name"] != "adam" and optim_params["name"] != "adaptive_first" and optim_params["name"] != "svrg":
                 p_true, p_gen = discriminator(x_true), discriminator(x_gen)
                 gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
                 dis_loss = - gen_loss.clone()
@@ -252,7 +307,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
                 dis_optimizer.zero_grad()
 
-                step(optim_params, dis_optimizer, current_iter, dis_loss, retain_graph=True)
+                step(optim_params, dis_optimizer, current_iter, dis_loss, epoch, optim_params["learning_rate_dis"], i, retain_graph=True)
 
                 # Generaator Update
                 for p in generator.parameters():
@@ -263,7 +318,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
                 gen_optimizer.zero_grad()
 
-                gen_updates += step(optim_params, gen_optimizer, current_iter, gen_loss)
+                gen_updates += step(optim_params, gen_optimizer, current_iter, gen_loss, epoch, optim_params["learning_rate_gen"], i)
 
                 for param_i, param in enumerate(generator.parameters()):
                     gen_param_avg[param_i] = gen_param_avg[param_i] * gen_updates / (gen_updates + 1.) + param.data.clone() / (gen_updates + 1.)
@@ -293,7 +348,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
                     dis_optimizer.zero_grad()
 
-                    step(optim_params, dis_optimizer, current_iter, dis_loss, retain_graph=True if model_params["update_frequency"] == 1 else False)
+                    step(optim_params, dis_optimizer, current_iter, dis_loss, epoch, optim_params["learning_rate_dis"], i, retain_graph=True if model_params["update_frequency"] == 1 else False)
 
                     if model_params["mode"] == "wgan" and model_params["gradient_penalty"] == 0.0:
                         for p in discriminator.parameters():
@@ -311,7 +366,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                     postfix_kwargs["GENLOSS"] = gen_loss.item()
                     gen_optimizer.zero_grad()
 
-                    step(optim_params, gen_optimizer, current_iter, gen_loss)
+                    step(optim_params, gen_optimizer, current_iter, gen_loss, epoch, optim_params["learning_rate_gen"], i)
 
                     for param_i, param in enumerate(generator.parameters()):
                         gen_param_avg[param_i] = gen_param_avg[param_i] * gen_updates / (gen_updates + 1.) + param.data.clone()/(gen_updates + 1.)
@@ -389,7 +444,7 @@ def run_config(all_params, dataset: str, experiment_name: str):
     BATCH_NORM_G = True
     BATCH_NORM_D = get_or_error(model_params, "batchnorm_dis")
     N_CHANNEL = 3
-    CUDA = 1
+    CUDA = 0
     if isinstance(CUDA, int):
         device = torch.device(f"cuda:{CUDA}")
     else:
@@ -593,6 +648,42 @@ def get_adapeg_params():
     return params
 
 
+def get_svrg_hyperparameters():
+    params = {
+        "model_params": {
+            "batch_size": 64,
+            "model": "dcgan",
+            "num_iter": 500000,
+            "ema": 0.9999,
+            "num_latent": 128,
+            "batchnorm_dis": False,
+            "optimizer": "adam",
+            "clip": 0.01,
+            "gradient_penalty": 10,
+            "mode": "wgan",
+            "seed": 1318,
+            "distribution": "normal",
+            "initialization": "normal",
+            "num_filters_gen": 64,
+            "num_filters_dis": 64,
+            "update_frequency": 1
+        },
+        "optimizer_params": []
+    }
+
+    params["optimizer_params"].append({
+        'momentum': 0.9,
+        'weight_decay': 0.0001,
+        'learning_rate_dis': 0.1,
+        'learning_rate_gen': 0.1,
+        'lr_reduction': "150-225",
+        "name": "svrg",
+        "vr_after": 1
+    })
+
+    return params
+
+
 if __name__ == "__main__":
 
     #torch.autograd.set_detect_anomaly(True)
@@ -622,19 +713,19 @@ if __name__ == "__main__":
     #     run.finish()
 
 
-    all_params = get_adapeg_params()
+    all_params = get_svrg_hyperparameters()
     for opt_i in all_params["optimizer_params"]:
         inner_params = {}
         inner_params["model_params"] = all_params["model_params"]
         inner_params["optimizer_params"] = opt_i
 
 
-        inner_params["model_params"]["evaluate_frequency"] = 2500
-        inner_params["model_params"]["num_samples"] = 50000
+        inner_params["model_params"]["evaluate_frequency"] = 10
+        inner_params["model_params"]["num_samples"] = 500
         inner_params["model_params"]["num_iter"] = 100000
         inner_params["optimizer_params"]["average"] = False
         print(json.dumps(inner_params, indent=4))
-        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
+        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
             run_config(inner_params, "cifar10", "testexperiment")
 
     # include = {"default_dcgan_wgangp_optimisticextraadam.json"}

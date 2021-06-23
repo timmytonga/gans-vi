@@ -17,18 +17,18 @@ class SVRG(Optimizer):
     r"""Implements the standard SVRG method
     """
 
-    def __init__(self, params, args, nbatches, lr,
+    def __init__(self, params, vr_from_epoch, nbatches, lr,
                  momentum, weight_decay):
         self.nbatches = nbatches
         self.batches_processed = 0
         self.epoch = 0
-        self.vr_from_epoch = args.vr_from_epoch
+        self.vr_from_epoch = vr_from_epoch
 
-        self.test_name = args.logfname #"densenet" #"resnet-" #"sgd-" #"resnet-"
-        if args.transform_locking:
-            self.test_name += "_LOCK_"
-        else:
-            self.test_name += "_ULOCK_"
+        # self.test_name = args.logfname #"densenet" #"resnet-" #"sgd-" #"resnet-"
+        # if args.transform_locking:
+        #     self.test_name += "_LOCK_"
+        # else:
+        #     self.test_name += "_ULOCK_"
 
         self.recalibration_i = 0
         self.running_interp = 0.9
@@ -49,7 +49,7 @@ class SVRG(Optimizer):
     def __setstate__(self, state):
         super(SVRG, self).__setstate__(state)
 
-    def initialize(self):
+    def initialize(self, device):
         m = self.nbatches
 
         for group in self.param_groups:
@@ -63,8 +63,8 @@ class SVRG(Optimizer):
                 param_state = self.state[p]
 
                 if 'gktbl' not in param_state:
-                    param_state['gktbl'] = torch.zeros(gtbl_size)
-                    param_state['logging_gktbl'] = torch.zeros(gtbl_size)
+                    param_state['gktbl'] = torch.zeros(gtbl_size).to(device=device)
+                    #param_state['logging_gktbl'] = torch.zeros(gtbl_size).to(device=device)
 
                 if 'tilde_x' not in param_state:
                     param_state['tilde_x'] = p.data.clone()
@@ -72,7 +72,7 @@ class SVRG(Optimizer):
 
                 if 'gavg' not in param_state:
                     param_state['gavg'] = p.data.clone().double().zero_()
-                    param_state['logging_gavg'] = p.data.clone().double().zero_()
+                    #param_state['logging_gavg'] = p.data.clone().double().zero_()
                     param_state['m2'] = p.data.clone().double().zero_()
                     param_state['running_cov'] = p.data.clone().double().zero_()
                     param_state['running_mean'] = p.data.clone().double().zero_()
@@ -99,31 +99,15 @@ class SVRG(Optimizer):
                 param_state['gavg_old'] = gavg.clone()
 
 
-    def recalibrate_start(self):
+    def recalibrate_start(self, device):
         """ Part of the recalibration pass with SVRG.
         Stores the gradients for later use.
         """
         self.epoch += 1
-        self.initialize()
+        self.initialize(device)
         self.recalibration_i = 0
 
-        # Write out any logging stats if needed
-        if len(self.gradient_variances) > 0:
-            fname = 'stats/{}variance_epoch{}.pkl'.format(self.test_name, self.epoch)
-            with open(fname, 'wb') as output:
-                pickle.dump({
-                    'gradient_variances': self.gradient_variances,
-                    'vr_step_variances': self.vr_step_variances,
-                    'batch_indices': self.batch_indices,
-                    'iterate_distances': self.iterate_distances,
-                    'epoch': self.epoch,
-                }, output)
-            self.gradient_variances = []
-            self.vr_step_variances = []
-            self.batch_indices = []
-            print("logging pass diagnostics saved to {}".format(fname))
-
-        if self.epoch >= self.vr_from_epoch:
+        if self.vr_from_epoch is not None and self.epoch >= self.vr_from_epoch:
             for group in self.param_groups:
                 for p in group['params']:
                     param_state = self.state[p]
@@ -133,10 +117,6 @@ class SVRG(Optimizer):
                     # xk is changed to the running_x
                     p.data.zero_().add_(param_state['running_x'])
                     param_state['tilde_x'] = p.data.clone()
-
-        else:
-            logging.info("Skipping recalibration as epoch {} not >= {}".format(
-            self.epoch, self.vr_from_epoch))
 
     def recalibrate(self, batch_id, closure):
         """ Part of the recalibration pass with SVRG.
@@ -152,8 +132,6 @@ class SVRG(Optimizer):
             for group in self.param_groups:
                 for p in group['params']:
                     if p.grad is None:
-                        print("grad none")
-                        pdb.set_trace()
                         continue
                     gk = p.grad.data.double()
 
@@ -395,7 +373,7 @@ class SVRG(Optimizer):
 
                 #########
 
-                if self.epoch < self.vr_from_epoch:
+                if self.vr_from_epoch is None or self.epoch < self.vr_from_epoch:
                     vr_gradient = gk.clone() # Just do sgd steps
                 else:
                     gi = gktbl[batch_id, :].cuda()
