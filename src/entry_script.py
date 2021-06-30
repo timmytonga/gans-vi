@@ -23,7 +23,9 @@ from models.resnet import ResNet32Generator, ResNet32Discriminator
 from scipy.stats import entropy
 from src.pytorch_fid.fid import calculate_fid_given_paths
 from src.optimizers.optim.run_vr import recalibrate
-
+from vr_dataloader.cifar_wrapper import CIFAR10_Wrapper
+from vr_dataloader.UpdatedDataLoader import DataLoader
+from vr_dataloader.vr_sampler import VRSampler
 
 def inception_score(imgs, cuda=True, batch_size=100, resize=False, splits=1):
     """Computes the inception score of the generated images imgs
@@ -237,6 +239,10 @@ def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=Fals
 
 def runner(trainloader, generator, discriminator, optim_params, model_params, device):
 
+    if optim_params["name"] == "svrg":
+        training_dataset = trainloader[1]
+        trainloader = trainloader[0]
+
     dis_optimizer, gen_optimizer = retrieve_optimizer(optim_params, generator, discriminator, len(trainloader), model_params["batch_size"])
     print("Training Optimizer ({}) on ({})".format(optim_params["name"], model_params["model"]))
 
@@ -252,6 +258,10 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
         gen_param_avg.append(param.data.clone())
         param_temp_holder.append(None)
 
+    if optim_params["tail_average"] != 0.0:
+        tail_num_batches = int(optim_params["tail_average"] * len(trainloader))
+        ntail_from = len(trainloader) - tail_num_batches
+
     begin_time = time.time()
     while gen_updates < model_params["num_iter"]:
         penalty = Variable(torch.Tensor([0.]))
@@ -259,6 +269,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
         loop = tqdm.tqdm(enumerate(trainloader), total=len(trainloader), leave=False)
 
         loop.set_description(f"EPOCH: {epoch}")
+        averaged_so_far = 0
         if optim_params["name"] == "svrg":
             if epoch >= 1:
                 recalibrate(model_params=model_params,
@@ -268,6 +279,21 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                             gen_optimizer=gen_optimizer,
                             dis_optimizer=dis_optimizer,
                             device=device)
+
+            if optim_params["tail_average"] > 0.0:
+                averaged_so_far = 0
+                # create/zero tail_average storage
+                for group in dis_optimizer.param_groups:
+                    for p in group['params']:
+                        param_state = dis_optimizer.state[p]
+                        if 'tail_average' not in param_state:
+                            param_state['tail_average'] = p.data.clone().double().zero_()
+
+                for group in gen_optimizer.param_groups:
+                    for p in group['params']:
+                        param_state = gen_optimizer.state[p]
+                        if 'tail_average' not in param_state:
+                            param_state['tail_average'] = p.data.clone().double().zero_()
 
         for i, data in loop:
             x_true, _ = data
@@ -350,6 +376,17 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
                     step(optim_params, dis_optimizer, current_iter, dis_loss, epoch, optim_params["learning_rate_dis"], i, retain_graph=True if model_params["update_frequency"] == 1 else False)
 
+                    if optim_params["name"] == "svrg":
+                        if optim_params["tail_average"] > 0.0:
+                            if i >= ntail_from:
+                                averaged_so_far += 1
+                                for group in dis_optimizer.param_groups:
+                                    for p in group['params']:
+                                        param_state = dis_optimizer.state[p]
+                                        tail = param_state['tail_average']
+                                        # Running mean calculation
+                                        tail.add_(1.0 / averaged_so_far, p.data.double() - tail)
+
                     if model_params["mode"] == "wgan" and model_params["gradient_penalty"] == 0.0:
                         for p in discriminator.parameters():
                             p.data.clamp_(-model_params["clip"], model_params["clip"])
@@ -368,6 +405,17 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
                     step(optim_params, gen_optimizer, current_iter, gen_loss, epoch, optim_params["learning_rate_gen"], i)
 
+                    if optim_params["name"] == "svrg":
+                        if optim_params["tail_average"] > 0.0:
+                            if i >= ntail_from:
+                                averaged_so_far += 1
+                                for group in gen_optimizer.param_groups:
+                                    for p in group['params']:
+                                        param_state = gen_optimizer.state[p]
+                                        tail = param_state['tail_average']
+                                        # Running mean calculation
+                                        tail.add_(1.0 / averaged_so_far, p.data.double() - tail)
+
                     for param_i, param in enumerate(generator.parameters()):
                         gen_param_avg[param_i] = gen_param_avg[param_i] * gen_updates / (gen_updates + 1.) + param.data.clone()/(gen_updates + 1.)
 
@@ -381,6 +429,28 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                 current_iter += 1
 
             loop.set_postfix(**postfix_kwargs)
+
+            if optim_params["name"] == "svrg":
+                if optim_params["tail_average"] > 0.0:
+                    if averaged_so_far != tail_num_batches:
+                        raise Exception("Off by one: {}, {}".format(averaged_so_far, tail_num_batches))
+                    current_lr = dis_optimizer.param_groups[0]['lr']
+
+                    if optim_params["learning_rate_dis"] != current_lr:
+
+                        for group in dis_optimizer.param_groups:
+                            for p in group['params']:
+                                param_state = dis_optimizer.state[p]
+                                tail = param_state['tail_average']
+                                p.data.zero_().add_(tail.type_as(p.data))
+
+                    current_lr = gen_optimizer.param_groups[0]['lr']
+                    if optim_params["learning_rate_gen"] != current_lr:
+                        for group in gen_optimizer.param_groups:
+                            for p in group['params']:
+                                param_state = gen_optimizer.state[p]
+                                tail = param_state['tail_average']
+                                p.data.zero_().add_(tail.type_as(p.data))
 
             if gen_updates % model_params["evaluate_frequency"] == 0 and o_gen_updates != gen_updates:
                 o_gen_updates = gen_updates
@@ -414,6 +484,8 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
 
         epoch += 1
+        if optim_params["name"] == "svrg":
+            training_dataset.retransform()
 
     optim_name = optim_params["name"]
     torch.save({
@@ -476,23 +548,45 @@ def run_config(all_params, dataset: str, experiment_name: str):
         if not os.path.exists(dataset_dir):
             os.makedirs(dataset_dir, exist_ok=True)
         if name == "cifar10":
-            transform = transforms.Compose([transforms.ToTensor(),
-                                            transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
 
-            dset = torchvision.datasets.CIFAR10(root=dataset_dir,
-                                                train=train,
-                                                transform=transform,
-                                                download=True)
-            dloader = torch.utils.data.DataLoader(dset,
-                                                  batch_size=model_params["batch_size"],
-                                                  shuffle=True,
-                                                  num_workers=1)
+            if opt_params["name"] == "svrg":
+                transform = transforms.Compose([
+                    transforms.RandomHorizontalFlip(),
+                    transforms.RandomCrop(32, padding=4),
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+                ])
+                kwargs = {'num_workers': 0, 'pin_memory': True}
+                train_dataset = CIFAR10_Wrapper(
+                    root=DATADIR, train=True,
+                    download=True, transform=transform)
 
-            return dloader
+                sampler = VRSampler(order="perm",
+                                    batch_size=model_params["batch_size"],
+                                    dataset_size=len(train_dataset))
+                train_loader = DataLoader(
+                    train_dataset, batch_sampler=sampler, **kwargs)
+
+                return (train_loader, train_dataset)
+            else:
+                transform = transforms.Compose([transforms.ToTensor(),
+                                                transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
+
+
+
+                dset = torchvision.datasets.CIFAR10(root=dataset_dir,
+                                                    train=train,
+                                                    transform=transform,
+                                                    download=True)
+                dloader = torch.utils.data.DataLoader(dset,
+                                                      batch_size=model_params["batch_size"],
+                                                      shuffle=True,
+                                                      num_workers=1)
+
+                return dloader
 
 
     training_set = get_dataset(dataset, True)
-    test_set = get_dataset(dataset, False)
 
     if MODEL == "resnet":
         gen = ResNet32Generator(N_LATENT, N_CHANNEL, N_FILTERS_G, BATCH_NORM_G)
@@ -678,7 +772,8 @@ def get_svrg_hyperparameters():
         'learning_rate_gen': 0.1,
         'lr_reduction': "150-225",
         "name": "svrg",
-        "vr_after": 1
+        "vr_after": 1,
+        "tail_average": 0.0
     })
 
     return params
