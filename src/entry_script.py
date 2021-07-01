@@ -674,8 +674,8 @@ def get_svrg_hyperparameters():
     params["optimizer_params"].append({
         'momentum': 0.9,
         'weight_decay': 0.0001,
-        'learning_rate_dis': 0.1,
-        'learning_rate_gen': 0.1,
+        'learning_rate_dis': 0.0001,
+        'learning_rate_gen': 0.0001,
         'lr_reduction': "150-225",
         "name": "svrg",
         "vr_after": 1
@@ -720,12 +720,12 @@ if __name__ == "__main__":
         inner_params["optimizer_params"] = opt_i
 
 
-        inner_params["model_params"]["evaluate_frequency"] = 10
-        inner_params["model_params"]["num_samples"] = 500
+        inner_params["model_params"]["evaluate_frequency"] = 2500
+        inner_params["model_params"]["num_samples"] = 50000
         inner_params["model_params"]["num_iter"] = 100000
         inner_params["optimizer_params"]["average"] = False
         print(json.dumps(inner_params, indent=4))
-        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
+        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
             run_config(inner_params, "cifar10", "testexperiment")
 
     # include = {"default_dcgan_wgangp_optimisticextraadam.json"}

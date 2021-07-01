@@ -49,7 +49,7 @@ class SVRG(Optimizer):
     def __setstate__(self, state):
         super(SVRG, self).__setstate__(state)
 
-    def initialize(self, device):
+    def initialize(self):
         m = self.nbatches
 
         for group in self.param_groups:
@@ -63,7 +63,7 @@ class SVRG(Optimizer):
                 param_state = self.state[p]
 
                 if 'gktbl' not in param_state:
-                    param_state['gktbl'] = torch.zeros(gtbl_size).to(device=device)
+                    param_state['gktbl'] = torch.zeros(gtbl_size)
                     #param_state['logging_gktbl'] = torch.zeros(gtbl_size).to(device=device)
 
                 if 'tilde_x' not in param_state:
@@ -99,12 +99,12 @@ class SVRG(Optimizer):
                 param_state['gavg_old'] = gavg.clone()
 
 
-    def recalibrate_start(self, device):
+    def recalibrate_start(self):
         """ Part of the recalibration pass with SVRG.
         Stores the gradients for later use.
         """
         self.epoch += 1
-        self.initialize(device)
+        self.initialize()
         self.recalibration_i = 0
 
         if self.vr_from_epoch is not None and self.epoch >= self.vr_from_epoch:

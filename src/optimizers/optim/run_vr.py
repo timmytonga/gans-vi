@@ -21,9 +21,9 @@ import numpy as np
 
 def recalibrate(model_params, train_loader, generator, discriminator, gen_optimizer, dis_optimizer, device):
     if hasattr(gen_optimizer, "recalibrate_start"):
-        gen_optimizer.recalibrate_start(device=device)
+        gen_optimizer.recalibrate_start()
     if hasattr(dis_optimizer, "recalibrate_start"):
-        dis_optimizer.recalibrate_start(device=device)
+        dis_optimizer.recalibrate_start()
 
     if gen_optimizer.vr_from_epoch is not None and gen_optimizer.epoch >= gen_optimizer.vr_from_epoch:
         for batch_idx, (x_true, target) in enumerate(train_loader):
@@ -32,7 +32,7 @@ def recalibrate(model_params, train_loader, generator, discriminator, gen_optimi
             x_true = x_true.to(device=device)
 
             z = Variable(utils.sample(model_params["distribution"], (len(x_true), model_params["num_latent"])))
-            z.to(device=device)
+            z = z.to(device=device)
 
             x_gen = generator(z)
             for p in generator.parameters():
