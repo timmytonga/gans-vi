@@ -765,16 +765,17 @@ def get_svrg_hyperparameters():
         "optimizer_params": []
     }
 
-    params["optimizer_params"].append({
-        'momentum': 0.9,
-        'weight_decay': 0.0001,
-        'learning_rate_dis': 0.0001,
-        'learning_rate_gen': 0.0001,
-        'lr_reduction': "150-225",
-        "name": "svrg",
-        "vr_after": 1,
-        "tail_average": 0.0
-    })
+    for lr in [0.00001]:
+        params["optimizer_params"].append({
+            'momentum': 0.9,
+            'weight_decay': 0.0001,
+            'learning_rate_dis': lr,
+            'learning_rate_gen': lr,
+            'lr_reduction': "none",
+            "name": "svrg",
+            "vr_after": 1,
+            "tail_average": 0.0
+        })
 
     return params
 
@@ -816,8 +817,8 @@ if __name__ == "__main__":
 
 
         inner_params["model_params"]["evaluate_frequency"] = 2500
-        inner_params["model_params"]["num_samples"] = 50000
-        inner_params["model_params"]["num_iter"] = 100000
+        inner_params["model_params"]["num_samples"] = 25000
+        inner_params["model_params"]["num_iter"] = 300000
         inner_params["optimizer_params"]["average"] = False
         print(json.dumps(inner_params, indent=4))
         with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
