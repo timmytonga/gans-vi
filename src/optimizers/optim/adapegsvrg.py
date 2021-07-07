@@ -7,7 +7,7 @@ from torch.optim import Optimizer
 required = object()
 
 
-class AdaPEGAdam(Optimizer):
+class AdaPEGAdamSVRG(Optimizer):
     def __init__(self, params, nbatches, model, vr_bn_at_recalibration,
                  vr_from_epoch, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=0, amsgrad=False, squared_grad=False, optimistic=False):
@@ -29,23 +29,17 @@ class AdaPEGAdam(Optimizer):
         self.batches_processed = 0
         self.epoch = 0
         self.running_tmp = {}
-        super(AdaPEGAdam, self).__init__(params, defaults)
+        super(AdaPEGAdamSVRG, self).__init__(params, defaults)
 
     def initialize(self):
         for group in self.param_groups:
             for p in group['params']:
-                momentum = group['momentum']
-
                 param_state = self.state[p]
 
                 if 'gavg' not in param_state:
                     param_state['gavg'] =  p.data.double().clone().zero_()
                     param_state['gi'] = p.data.clone().zero_()
                     param_state['gi_debug'] = p.data.clone().zero_()
-
-                if momentum != 0:
-                    if 'momentum_buffer' not in param_state:
-                        buf = param_state['momentum_buffer'] = p.data.clone().zero_()
 
                 if 'tilde_x' not in param_state:
                     param_state['tilde_x'] = p.data.clone()
@@ -88,6 +82,8 @@ class AdaPEGAdam(Optimizer):
             self.recal_calls += 1
             for group in self.param_groups:
                 for p in group['params']:
+                    if p.grad is None:
+                        continue
                     gk = p.grad.data
 
                     param_state = self.state[p]
@@ -116,7 +112,7 @@ class AdaPEGAdam(Optimizer):
             state[skey].zero_().add_(self.running_tmp[skey])
 
     def __setstate__(self, state):
-        super(AdaPEGAdam, self).__setstate__(state)
+        super(AdaPEGAdamSVRG, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 
@@ -163,7 +159,6 @@ class AdaPEGAdam(Optimizer):
                         'AdaPEGAdam does not support sparse gradients, please consider SparseAdam instead')
                 amsgrad = group['amsgrad']
 
-
                 param_state = self.state[p]
 
                 gi = param_state['gi']
@@ -173,7 +168,6 @@ class AdaPEGAdam(Optimizer):
                     grad = gk.clone().sub_(gi).add_(gavg.type_as(gk))
                 else:
                     grad = gk.clone()  # Just do sgd steps
-
 
                 state = self.state[p]
 

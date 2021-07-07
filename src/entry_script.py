@@ -10,6 +10,7 @@ import optimizers.optim.omd as OMD
 import optimizers.adasls.adasls as adasls
 import optimizers.optim.adapeg as AdaPEG
 import optimizers.optim.torch_svg as SVRG
+import optimizers.optim.adapegsvrg as AdaPEGSVRG
 import numpy as np
 import tqdm
 import wandb
@@ -140,6 +141,28 @@ def retrieve_optimizer(opt_dict,
                                   lr=opt_dict["learning_rate_gen"],
                                   momentum=opt_dict["momentum"],
                                   weight_decay=opt_dict["weight_decay"])
+    elif opt_dict["name"] == "adapegsvrg":
+        dis_optimizer = AdaPEGSVRG.AdaPEGAdamSVRG(discriminator.parameters(),
+                                                  vr_from_epoch=opt_dict["vr_after"],
+                                                  nbatches=n_train,
+                                                  lr=opt_dict["learning_rate_dis"],
+                                                  weight_decay=opt_dict["weight_decay"],
+                                                  betas=(opt_dict["beta1"], opt_dict["beta2"]),
+                                                  squared_grad=opt_dict["squared_grad"],
+                                                  optimistic=opt_dict["optimistic"],
+                                                  model=discriminator,
+                                                  vr_bn_at_recalibration=opt_dict["vr_bn_at_recalibration"])
+
+        gen_optimizer = AdaPEGSVRG.AdaPEGAdamSVRG(generator.parameters(),
+                                                  vr_from_epoch=opt_dict["vr_after"],
+                                                  nbatches=n_train,
+                                                  lr=opt_dict["learning_rate_gen"],
+                                                  weight_decay=opt_dict["weight_decay"],
+                                                  betas=(opt_dict["beta1"], opt_dict["beta2"]),
+                                                  squared_grad=opt_dict["squared_grad"],
+                                                  optimistic=opt_dict["optimistic"],
+                                                  model=generator,
+                                                  vr_bn_at_recalibration=opt_dict["vr_bn_at_recalibration"])
 
     elif opt_name == "adaptive_first":
 
@@ -204,7 +227,7 @@ def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=Fals
         closure = lambda: loss
         optimizer.step(closure=closure, retain_graph=retain_graph)
         return 1
-    elif opt_params["name"] == "svrg":
+    elif opt_params["name"].endswith("svrg"):
         if opt_params["lr_reduction"] == "default":
             lr = lr * (0.1 ** (epoch // 75))
         elif opt_params["lr_reduction"] == "none" or opt_params["lr_reduction"] == "False":
@@ -226,8 +249,9 @@ def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=Fals
         elif opt_params["lr_reduction"] == "every30":
             lr = lr * (0.1 ** (epoch // 30))
 
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = lr
+        if opt_params["lr_reduction"] != "none":
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = lr
 
         closure = lambda: loss
         loss.backward(retain_graph=retain_graph)
@@ -239,7 +263,7 @@ def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=Fals
 
 def runner(trainloader, generator, discriminator, optim_params, model_params, device):
 
-    if optim_params["name"] == "svrg":
+    if optim_params["name"].endswith("svrg"):
         training_dataset = trainloader[1]
         trainloader = trainloader[0]
 
@@ -270,7 +294,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
         loop.set_description(f"EPOCH: {epoch}")
         averaged_so_far = 0
-        if optim_params["name"] == "svrg":
+        if optim_params["name"].endswith("svrg"):
             if epoch >= 1:
                 recalibrate(model_params=model_params,
                             train_loader=trainloader,
@@ -376,7 +400,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
                     step(optim_params, dis_optimizer, current_iter, dis_loss, epoch, optim_params["learning_rate_dis"], i, retain_graph=True if model_params["update_frequency"] == 1 else False)
 
-                    if optim_params["name"] == "svrg":
+                    if optim_params["name"].endswith("svrg"):
                         if optim_params["tail_average"] > 0.0:
                             if i >= ntail_from:
                                 averaged_so_far += 1
@@ -405,7 +429,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
                     step(optim_params, gen_optimizer, current_iter, gen_loss, epoch, optim_params["learning_rate_gen"], i)
 
-                    if optim_params["name"] == "svrg":
+                    if optim_params["name"].endswith("svrg"):
                         if optim_params["tail_average"] > 0.0:
                             if i >= ntail_from:
                                 averaged_so_far += 1
@@ -430,7 +454,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
             loop.set_postfix(**postfix_kwargs)
 
-            if optim_params["name"] == "svrg":
+            if optim_params["name"].endswith("svrg"):
                 if optim_params["tail_average"] > 0.0:
                     if averaged_so_far != tail_num_batches:
                         raise Exception("Off by one: {}, {}".format(averaged_so_far, tail_num_batches))
@@ -484,7 +508,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
 
         epoch += 1
-        if optim_params["name"] == "svrg":
+        if optim_params["name"].endswith("svrg"):
             training_dataset.retransform()
 
     optim_name = optim_params["name"]
@@ -549,7 +573,7 @@ def run_config(all_params, dataset: str, experiment_name: str):
             os.makedirs(dataset_dir, exist_ok=True)
         if name == "cifar10":
 
-            if opt_params["name"] == "svrg":
+            if opt_params["name"].endswith("svrg"):
                 transform = transforms.Compose([
                     transforms.RandomHorizontalFlip(),
                     transforms.RandomCrop(32, padding=4),
@@ -691,7 +715,7 @@ def retrieve_line_search_paper_parameters():
     return opt_list + adaptive_first_sls_lipschitz_list + adaptive_first_sls_lipschitz_list + adaptive_first_sps_list
 
 
-def get_adapeg_params():
+def get_adapeg_params(with_svrg=False):
     params = {
         "model_params": {
             "batch_size": 64,
@@ -714,15 +738,31 @@ def get_adapeg_params():
     }
 
     for lr in [0.0001, 0.00001]:
-        optim_param_base = {
-            "name": "adapeg",
-            "learning_rate_dis":lr,
-            "learning_rate_gen":lr,
-            "beta2":0.9,
-            "beta1":0.5,
-            "squared_grad": True,
-            "optimistic": False
-        }
+        if not with_svrg:
+            optim_param_base = {
+                "name": "adapeg",
+                "learning_rate_dis":lr,
+                "learning_rate_gen":lr,
+                "beta2":0.9,
+                "beta1":0.5,
+                "squared_grad": True,
+                "optimistic": False
+            }
+        else:
+            optim_param_base = {
+                "name": "adapegsvrg",
+                "learning_rate_dis": lr,
+                "learning_rate_gen": lr,
+                "beta2": 0.9,
+                "beta1": 0.5,
+                "squared_grad": True,
+                "optimistic": False,
+                'lr_reduction': "none",
+                "vr_after": 1,
+                "tail_average": 0.0,
+                "weight_decay": 0,
+                "vr_bn_at_recalibration": True
+            }
 
         params["optimizer_params"].append(optim_param_base)
 
@@ -809,7 +849,7 @@ if __name__ == "__main__":
     #     run.finish()
 
 
-    all_params = get_svrg_hyperparameters()
+    all_params = get_adapeg_params(with_svrg=True)
     for opt_i in all_params["optimizer_params"]:
         inner_params = {}
         inner_params["model_params"] = all_params["model_params"]
@@ -821,7 +861,7 @@ if __name__ == "__main__":
         inner_params["model_params"]["num_iter"] = 300000
         inner_params["optimizer_params"]["average"] = False
         print(json.dumps(inner_params, indent=4))
-        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
+        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
             run_config(inner_params, "cifar10", "testexperiment")
 
     # include = {"default_dcgan_wgangp_optimisticextraadam.json"}
