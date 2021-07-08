@@ -116,7 +116,7 @@ class AdaPEGAdamSVRG(Optimizer):
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 
-    def step(self, closure=None):
+    def step(self, batch_id, closure=None):
         loss = None
         if closure is not None:
             loss = closure()

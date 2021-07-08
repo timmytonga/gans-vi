@@ -338,7 +338,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
             x_gen = generator(z)
 
 
-            if optim_params["name"] != "adam" and optim_params["name"] != "adaptive_first" and optim_params["name"] != "svrg":
+            if optim_params["name"] != "adam" and optim_params["name"] != "adaptive_first" and not optim_params["name"].endswith("svrg"):
                 p_true, p_gen = discriminator(x_true), discriminator(x_gen)
                 gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
                 dis_loss = - gen_loss.clone()
@@ -732,12 +732,13 @@ def get_adapeg_params(with_svrg=False):
             "distribution": "normal",
             "initialization": "normal",
             "num_filters_gen": 64,
-            "num_filters_dis": 64
+            "num_filters_dis": 64,
+            "update_frequency": 1
         },
         "optimizer_params": []
     }
 
-    for lr in [0.0001, 0.00001]:
+    for lr in [0.0001]:
         if not with_svrg:
             optim_param_base = {
                 "name": "adapeg",
@@ -766,18 +767,18 @@ def get_adapeg_params(with_svrg=False):
 
         params["optimizer_params"].append(optim_param_base)
 
-    for lr in [0.001, 0.00001]:
-        optim_param_base = {
-            "name": "adapeg",
-            "learning_rate_dis": lr,
-            "learning_rate_gen": lr,
-            "beta2": 0.9,
-            "beta1": 0.5,
-            "squared_grad": True,
-            "optimistic": True
-        }
-
-        params["optimizer_params"].append(optim_param_base)
+    # for lr in [0.001, 0.00001]:
+    #     optim_param_base = {
+    #         "name": "adapeg",
+    #         "learning_rate_dis": lr,
+    #         "learning_rate_gen": lr,
+    #         "beta2": 0.9,
+    #         "beta1": 0.5,
+    #         "squared_grad": True,
+    #         "optimistic": True
+    #     }
+    #
+    #     params["optimizer_params"].append(optim_param_base)
 
     return params
 
