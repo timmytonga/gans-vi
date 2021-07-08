@@ -210,7 +210,7 @@ def retrieve_optimizer(opt_dict,
     return dis_optimizer, gen_optimizer
 
 
-def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=False):
+def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=False, closure=None):
     if opt_params["name"] == "extraadam":
         loss.backward(retain_graph=retain_graph)
         if (ts + 1) % 2 != 0:
@@ -219,10 +219,12 @@ def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=Fals
         else:
             optimizer.step()
             return 1
-    elif opt_params["name"] == "pastadam" or opt_params["name"] == "optimisticadam" or opt_params["name"] == "adam" or opt_params["name"] == "adapeg":
+    elif opt_params["name"] == "pastadam" or opt_params["name"] == "optimisticadam" or opt_params["name"] == "adapeg":
         loss.backward(retain_graph=retain_graph)
         optimizer.step()
         return 1
+    elif opt_params["name"] == "adam":
+        return optimizer.step(closure=closure)
     elif opt_params["name"] == "adaptive_first":
         closure = lambda: loss
         optimizer.step(closure=closure, retain_graph=retain_graph)
@@ -253,9 +255,10 @@ def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=Fals
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr
 
-        closure = lambda: loss
-        loss.backward(retain_graph=retain_graph)
-        optimizer.step(batch_id, closure)
+        if closure is None:
+            closure = lambda: loss
+            loss.backward(retain_graph=retain_graph)
+        return optimizer.step(batch_id, closure)
 
     else:
         raise RuntimeError("Could not find step procedure for optimizer {}".format(opt_params["name"]))
@@ -282,7 +285,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
         gen_param_avg.append(param.data.clone())
         param_temp_holder.append(None)
 
-    if optim_params["tail_average"] != 0.0:
+    if optim_params["name"].endswith("svrg") and optim_params["tail_average"] != 0.0:
         tail_num_batches = int(optim_params["tail_average"] * len(trainloader))
         ntail_from = len(trainloader) - tail_num_batches
 
@@ -335,10 +338,11 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                     for p in discriminator.parameters():
                         p.data.clamp_(-model_params["CLIP"], model_params["CLIP"])
 
-            x_gen = generator(z)
+
 
 
             if optim_params["name"] != "adam" and optim_params["name"] != "adaptive_first" and not optim_params["name"].endswith("svrg"):
+                x_gen = generator(z)
                 p_true, p_gen = discriminator(x_true), discriminator(x_gen)
                 gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
                 dis_loss = - gen_loss.clone()
@@ -389,16 +393,20 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                     for p in generator.parameters():
                         p.requires_grad = False
 
-                    p_true, p_gen = discriminator(x_true), discriminator(x_gen)
-                    dis_loss = - utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
-                    postfix_kwargs["DISLOSS"] = dis_loss.item()
-                    if model_params["gradient_penalty"] != 0:
-                        penalty = discriminator.get_penalty(x_true.data, x_gen.data)
-                        dis_loss += penalty * model_params["gradient_penalty"]
+                    retain_graph_param = True if model_params["update_frequency"] == 1 else False
 
-                    dis_optimizer.zero_grad()
-
-                    step(optim_params, dis_optimizer, current_iter, dis_loss, epoch, optim_params["learning_rate_dis"], i, retain_graph=True if model_params["update_frequency"] == 1 else False)
+                    def dis_closure():
+                        dis_optimizer.zero_grad()
+                        x_genc = generator(z)
+                        p_truec, p_genc = discriminator(x_true), discriminator(x_genc)
+                        dis_lossc = - utils.compute_gan_loss(p_truec, p_genc, mode=model_params["mode"])
+                        if model_params["gradient_penalty"] != 0:
+                            penalty = discriminator.get_penalty(x_true.data, x_genc.data)
+                            dis_lossc += penalty * model_params["gradient_penalty"]
+                        dis_lossc.backward(retain_graph=retain_graph_param)
+                        return dis_lossc
+                    rdiss_loss = step(optim_params, dis_optimizer, current_iter, None, epoch, optim_params["learning_rate_dis"], i, retain_graph=retain_graph_param, closure=dis_closure)
+                    postfix_kwargs["DISLOSS"] = rdiss_loss.item()
 
                     if optim_params["name"].endswith("svrg"):
                         if optim_params["tail_average"] > 0.0:
@@ -422,12 +430,17 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                     for p in discriminator.parameters():
                         p.requires_grad = False
 
-                    p_true, p_gen = discriminator(x_true), discriminator(x_gen)
-                    gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
-                    postfix_kwargs["GENLOSS"] = gen_loss.item()
-                    gen_optimizer.zero_grad()
+                    def gen_closure():
+                        gen_optimizer.zero_grad()
+                        x_gen = generator(z)
+                        p_true, p_gen = discriminator(x_true), discriminator(x_gen)
+                        gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
+                        gen_loss.backward()
+                        return gen_loss
 
-                    step(optim_params, gen_optimizer, current_iter, gen_loss, epoch, optim_params["learning_rate_gen"], i)
+
+                    rgen_loss = step(optim_params, gen_optimizer, current_iter, None, epoch, optim_params["learning_rate_gen"], i, closure=gen_closure)
+                    postfix_kwargs["GENLOSS"] = rgen_loss.item()
 
                     if optim_params["name"].endswith("svrg"):
                         if optim_params["tail_average"] > 0.0:
@@ -858,7 +871,7 @@ if __name__ == "__main__":
 
 
         inner_params["model_params"]["evaluate_frequency"] = 2500
-        inner_params["model_params"]["num_samples"] = 25000
+        inner_params["model_params"]["num_samples"] = 100
         inner_params["model_params"]["num_iter"] = 300000
         inner_params["optimizer_params"]["average"] = False
         print(json.dumps(inner_params, indent=4))

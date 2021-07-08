@@ -36,6 +36,18 @@ class AdaPEGAdamSVRG(Optimizer):
             for p in group['params']:
                 param_state = self.state[p]
 
+                # State initialization
+                if len(param_state) == 0:
+                    param_state['step'] = 0
+                    # Exponential moving average of gradient values
+                    param_state['exp_avg'] = torch.zeros_like(p.data)
+                    # Exponential moving average of squared gradient values
+                    param_state['exp_avg_sq'] = torch.zeros_like(p.data)
+                    amsgrad = group['amsgrad']
+                    if amsgrad:
+                        # Maintains max of all exp. moving avg. of sq. grad. values
+                        param_state['max_exp_avg_sq'] = torch.zeros_like(p.data)
+
                 if 'gavg' not in param_state:
                     param_state['gavg'] =  p.data.double().clone().zero_()
                     param_state['gi'] = p.data.clone().zero_()
@@ -117,9 +129,7 @@ class AdaPEGAdamSVRG(Optimizer):
             group.setdefault('amsgrad', False)
 
     def step(self, batch_id, closure=None):
-        loss = None
-        if closure is not None:
-            loss = closure()
+
 
         if self.epoch >= self.vr_from_epoch:
             self.store_running_mean()
@@ -140,6 +150,8 @@ class AdaPEGAdamSVRG(Optimizer):
             ## Store x_tilde gradient in gi, and revert to xk
             for group in self.param_groups:
                 for p in group['params']:
+                    if p.grad is None:
+                        continue
                     param_state = self.state[p]
                     xk = param_state['xk']
                     gi = param_state['gi']
@@ -149,10 +161,14 @@ class AdaPEGAdamSVRG(Optimizer):
             # Make sure batchnorm is handled correctly.
             self.restore_running_mean()
 
+        loss = None
+        if closure is not None:
+            loss = closure()
+
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
-                    return None
+                    return loss
                 gk = p.grad.data
                 if gk.is_sparse:
                     raise RuntimeError(
@@ -170,17 +186,6 @@ class AdaPEGAdamSVRG(Optimizer):
                     grad = gk.clone()  # Just do sgd steps
 
                 state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p.data)
-                    # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p.data)
-                    if amsgrad:
-                        # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(p.data)
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 if amsgrad:
