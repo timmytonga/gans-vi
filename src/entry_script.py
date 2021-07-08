@@ -756,7 +756,7 @@ def get_adapeg_params(with_svrg=False):
                 "beta2": 0.9,
                 "beta1": 0.5,
                 "squared_grad": True,
-                "optimistic": False,
+                "optimistic": True,
                 'lr_reduction': "none",
                 "vr_after": 1,
                 "tail_average": 0.0,
