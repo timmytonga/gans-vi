@@ -871,11 +871,11 @@ if __name__ == "__main__":
 
 
         inner_params["model_params"]["evaluate_frequency"] = 2500
-        inner_params["model_params"]["num_samples"] = 100
-        inner_params["model_params"]["num_iter"] = 300000
+        inner_params["model_params"]["num_samples"] = 25000
+        inner_params["model_params"]["num_iter"] = 100000
         inner_params["optimizer_params"]["average"] = False
         print(json.dumps(inner_params, indent=4))
-        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
+        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
             run_config(inner_params, "cifar10", "testexperiment")
 
     # include = {"default_dcgan_wgangp_optimisticextraadam.json"}
