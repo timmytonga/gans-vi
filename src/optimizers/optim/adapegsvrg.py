@@ -168,7 +168,7 @@ class AdaPEGAdamSVRG(Optimizer):
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
-                    return loss
+                    continue
                 gk = p.grad.data
                 if gk.is_sparse:
                     raise RuntimeError(

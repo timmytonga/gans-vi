@@ -38,20 +38,103 @@ class Extragradient(Optimizer):
         defaults: (dict): a dict containing default values of optimization
             options (used when a parameter group doesn't specify them).
     """
+
     def __init__(self, params, defaults):
         super(Extragradient, self).__init__(params, defaults)
         self.params_copy = []
+        m = self.defaults["nbatches"]
+        for group in self.param_groups:
+            for p in group['params']:
+                gsize = p.data.size()
+                gtbl_size = torch.Size([m] + list(gsize))
+
+                param_state = self.state[p]
+
+                if 'gktbl' not in param_state:
+                    param_state['gktbl'] = torch.zeros(gtbl_size)
+
+                if 'gavg' not in param_state:
+                    param_state['gavg'] = p.data.clone().double().zero_()
 
     def update(self, p, group):
         raise NotImplementedError
 
-    def extrapolation(self):
+    def store_old_table(self):
+        """
+        Stores the old gradient table for recalibration purposes.
+        """
+
+        for group in self.param_groups:
+            for p in group['params']:
+                param_state = self.state[p]
+
+                gktbl = param_state['gktbl']
+                gavg = param_state['gavg']
+
+                param_state['gktbl_old'] = gktbl.clone()
+                param_state['gavg_old'] = gavg.clone()
+
+    def recalibrate_start(self):
+        """ Part of the recalibration pass with SVRG.
+        Stores the gradients for later use.
+        """
+
+        self.recalibration_i = 0
+
+        for group in self.param_groups:
+            for p in group['params']:
+                param_state = self.state[p]
+                param_state['gavg'].zero_()
+
+                # xk is changed to the running_x
+                # p.data.zero_().add_(param_state['running_x'])
+                # param_state['tilde_x'] = p.data.clone()
+
+    def recalibrate(self, batch_id, closure):
+        """ Part of the recalibration pass with SVRG.
+        Stores the gradients for later use.
+        """
+        loss = closure()
+        # print("recal loss:", loss)
+
+        self.recalibration_i += 1
+        if self.defaults["svrg"] == True:
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is None:
+                        continue
+                    gk = p.grad.data.double()
+
+                    param_state = self.state[p]
+
+                    gktbl = param_state['gktbl']
+                    gavg = param_state['gavg']
+
+                    # pdb.set_trace()
+
+                    # Online mean/variance calcuation from wikipedia
+                    delta = gk - gavg
+                    gavg.add_(1.0 / self.recalibration_i, delta)
+
+                    #########
+                    gktbl[batch_id, :] = p.grad.data.cpu().clone()
+
+        return loss
+
+    def extrapolation(self, batch_id):
         """Performs the extrapolation step and save a copy of the current parameters for the update step.
         """
         # Check if a copy of the parameters was already made.
         is_empty = len(self.params_copy) == 0
         for group in self.param_groups:
             for p in group['params']:
+                if p.grad is None:
+                    continue
+                param_state = self.state[p]
+                gktbl = param_state['gktbl']
+                gavg = param_state['gavg'].type_as(p.data)
+                gi = gktbl[batch_id, :].cuda()
+                p.grad.data.sub_(gi - gavg)
                 u = self.update(p, group)
                 if is_empty:
                     # Save the current parameters for the update step. Several extrapolation step can be made before each update but only the parameters before the first extrapolation step are saved.
@@ -61,7 +144,7 @@ class Extragradient(Optimizer):
                 # Update the current parameters
                 p.data.add_(u)
 
-    def step(self, closure=None):
+    def step(self, batch_id, closure=None):
         """Performs a single optimization step.
 
         Arguments:
@@ -78,13 +161,20 @@ class Extragradient(Optimizer):
         i = -1
         for group in self.param_groups:
             for p in group['params']:
+                if p.grad is None:
+                    continue
+
+                param_state = self.state[p]
+                gktbl = param_state['gktbl']
+                gavg = param_state['gavg'].type_as(p.data)
+                gi = gktbl[batch_id, :].cuda()
+                p.grad.data.sub_(gi - gavg)
                 i += 1
                 u = self.update(p, group)
                 if u is None:
                     continue
                 # Update the parameters saved during the extrapolation step
                 p.data = self.params_copy[i].add_(u)
-
 
         # Free the old parameters
         self.params_copy = []
@@ -139,8 +229,9 @@ class ExtraSGD(Extragradient):
 
         The Nesterov version is analogously modified.
     """
+
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False):
+                 weight_decay=0, nesterov=False, svrg=True, nbatches=64):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -149,7 +240,7 @@ class ExtraSGD(Extragradient):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
-                        weight_decay=weight_decay, nesterov=nesterov)
+                        weight_decay=weight_decay, nesterov=nesterov, svrg=svrg, nbatches=nbatches)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(ExtraSGD, self).__init__(params, defaults)
@@ -183,7 +274,7 @@ class ExtraSGD(Extragradient):
             else:
                 d_p = buf
 
-        return -group['lr']*d_p
+        return -group['lr'] * d_p
 
 
 class ExtraAdam(Extragradient):
@@ -203,17 +294,17 @@ class ExtraAdam(Extragradient):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, amsgrad=False):
+                 weight_decay=0, amsgrad=False, svrg=True, nbatches=64):
         if not 0.0 <= lr:
-         raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
-         raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError("Invalid epsilon value: {}".format(eps))
         if not 0.0 <= betas[0] < 1.0:
-         raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
+            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
-         raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                     weight_decay=weight_decay, amsgrad=amsgrad)
+                        weight_decay=weight_decay, amsgrad=amsgrad, svrg=svrg, nbatches=nbatches)
         super(ExtraAdam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -232,7 +323,7 @@ class ExtraAdam(Extragradient):
         state = self.state[p]
 
         # State initialization
-        if len(state) == 0:
+        if "step" not in state:
             state['step'] = 0
             # Exponential moving average of gradient values
             state['exp_avg'] = torch.zeros_like(p.data)
@@ -267,4 +358,4 @@ class ExtraAdam(Extragradient):
         bias_correction2 = 1 - beta2 ** state['step']
         step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
 
-        return -step_size*exp_avg/denom
+        return -step_size * exp_avg / denom
