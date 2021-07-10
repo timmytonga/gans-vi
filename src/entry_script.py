@@ -98,10 +98,14 @@ def retrieve_optimizer(opt_dict,
     if opt_dict["name"] == "extraadam" or opt_dict["name"] == "pastadam":
         dis_optimizer = ExtraGradient.ExtraAdam(discriminator.parameters(),
                                                 lr=opt_dict["learning_rate_dis"],
-                                                betas=(opt_dict["beta1"], opt_dict["beta2"]))
+                                                betas=(opt_dict["beta1"], opt_dict["beta2"]),
+                                                svrg=True,
+                                                nbatches=n_train)
         gen_optimizer = ExtraGradient.ExtraAdam(generator.parameters(),
                                                 lr=opt_dict["learning_rate_gen"],
-                                                betas=(opt_dict["beta1"], opt_dict["beta2"]))
+                                                betas=(opt_dict["beta1"], opt_dict["beta2"]),
+                                                svrg=True,
+                                                nbatches=n_train)
     elif opt_dict["name"] == "adapeg":
         dis_optimizer = AdaPEG.AdaPEGAdam(discriminator.parameters(),
                                           lr=opt_dict["learning_rate_dis"],
@@ -214,10 +218,10 @@ def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=Fals
     if opt_params["name"] == "extraadam":
         loss.backward(retain_graph=retain_graph)
         if (ts + 1) % 2 != 0:
-            optimizer.extrapolation()
+            optimizer.extrapolation(batch_id)
             return 0
         else:
-            optimizer.step()
+            optimizer.step(batch_id)
             return 1
     elif opt_params["name"] == "pastadam" or opt_params["name"] == "optimisticadam" or opt_params["name"] == "adapeg":
         loss.backward(retain_graph=retain_graph)
@@ -297,7 +301,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
         loop.set_description(f"EPOCH: {epoch}")
         averaged_so_far = 0
-        if optim_params["name"].endswith("svrg"):
+        if optim_params["name"].endswith("svrg") or optim_params["name"] == "extraadam":
             if epoch >= 1:
                 recalibrate(model_params=model_params,
                             train_loader=trainloader,
@@ -307,20 +311,6 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                             dis_optimizer=dis_optimizer,
                             device=device)
 
-            if optim_params["tail_average"] > 0.0:
-                averaged_so_far = 0
-                # create/zero tail_average storage
-                for group in dis_optimizer.param_groups:
-                    for p in group['params']:
-                        param_state = dis_optimizer.state[p]
-                        if 'tail_average' not in param_state:
-                            param_state['tail_average'] = p.data.clone().double().zero_()
-
-                for group in gen_optimizer.param_groups:
-                    for p in group['params']:
-                        param_state = gen_optimizer.state[p]
-                        if 'tail_average' not in param_state:
-                            param_state['tail_average'] = p.data.clone().double().zero_()
 
         for i, data in loop:
             x_true, _ = data
@@ -331,8 +321,8 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
             z = z.to(device)
 
             if optim_params["name"] == "pastadam":
-                dis_optimizer.extrapolation()
-                gen_optimizer.extrapolation()
+                dis_optimizer.extrapolation(i)
+                gen_optimizer.extrapolation(i)
 
                 if model_params["mode"] == "wgan" and model_params["gradient_penalty"] == 0.0:
                     for p in discriminator.parameters():
@@ -408,17 +398,6 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                     rdiss_loss = step(optim_params, dis_optimizer, current_iter, None, epoch, optim_params["learning_rate_dis"], i, retain_graph=retain_graph_param, closure=dis_closure)
                     postfix_kwargs["DISLOSS"] = rdiss_loss.item()
 
-                    if optim_params["name"].endswith("svrg"):
-                        if optim_params["tail_average"] > 0.0:
-                            if i >= ntail_from:
-                                averaged_so_far += 1
-                                for group in dis_optimizer.param_groups:
-                                    for p in group['params']:
-                                        param_state = dis_optimizer.state[p]
-                                        tail = param_state['tail_average']
-                                        # Running mean calculation
-                                        tail.add_(1.0 / averaged_so_far, p.data.double() - tail)
-
                     if model_params["mode"] == "wgan" and model_params["gradient_penalty"] == 0.0:
                         for p in discriminator.parameters():
                             p.data.clamp_(-model_params["clip"], model_params["clip"])
@@ -442,16 +421,6 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                     rgen_loss = step(optim_params, gen_optimizer, current_iter, None, epoch, optim_params["learning_rate_gen"], i, closure=gen_closure)
                     postfix_kwargs["GENLOSS"] = rgen_loss.item()
 
-                    if optim_params["name"].endswith("svrg"):
-                        if optim_params["tail_average"] > 0.0:
-                            if i >= ntail_from:
-                                averaged_so_far += 1
-                                for group in gen_optimizer.param_groups:
-                                    for p in group['params']:
-                                        param_state = gen_optimizer.state[p]
-                                        tail = param_state['tail_average']
-                                        # Running mean calculation
-                                        tail.add_(1.0 / averaged_so_far, p.data.double() - tail)
 
                     for param_i, param in enumerate(generator.parameters()):
                         gen_param_avg[param_i] = gen_param_avg[param_i] * gen_updates / (gen_updates + 1.) + param.data.clone()/(gen_updates + 1.)
@@ -467,27 +436,6 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
             loop.set_postfix(**postfix_kwargs)
 
-            if optim_params["name"].endswith("svrg"):
-                if optim_params["tail_average"] > 0.0:
-                    if averaged_so_far != tail_num_batches:
-                        raise Exception("Off by one: {}, {}".format(averaged_so_far, tail_num_batches))
-                    current_lr = dis_optimizer.param_groups[0]['lr']
-
-                    if optim_params["learning_rate_dis"] != current_lr:
-
-                        for group in dis_optimizer.param_groups:
-                            for p in group['params']:
-                                param_state = dis_optimizer.state[p]
-                                tail = param_state['tail_average']
-                                p.data.zero_().add_(tail.type_as(p.data))
-
-                    current_lr = gen_optimizer.param_groups[0]['lr']
-                    if optim_params["learning_rate_gen"] != current_lr:
-                        for group in gen_optimizer.param_groups:
-                            for p in group['params']:
-                                param_state = gen_optimizer.state[p]
-                                tail = param_state['tail_average']
-                                p.data.zero_().add_(tail.type_as(p.data))
 
             if gen_updates % model_params["evaluate_frequency"] == 0 and o_gen_updates != gen_updates:
                 o_gen_updates = gen_updates
@@ -863,45 +811,45 @@ if __name__ == "__main__":
     #     run.finish()
 
 
-    all_params = get_adapeg_params(with_svrg=True)
-    for opt_i in all_params["optimizer_params"]:
-        inner_params = {}
-        inner_params["model_params"] = all_params["model_params"]
-        inner_params["optimizer_params"] = opt_i
-
-
-        inner_params["model_params"]["evaluate_frequency"] = 2500
-        inner_params["model_params"]["num_samples"] = 100
-        inner_params["model_params"]["num_iter"] = 300000
-        inner_params["optimizer_params"]["average"] = False
-        print(json.dumps(inner_params, indent=4))
-        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
-            run_config(inner_params, "cifar10", "testexperiment")
-
-    # include = {"default_dcgan_wgangp_optimisticextraadam.json"}
-    # for file_name in os.listdir("../config"):
-    #     if file_name not in include:
-    #         continue
-    #     with open(os.path.join("../config", file_name)) as f:
-    #         all_params = json.load(f)
-    #     if all_params["model_params"]["model"] != "resnet":
-    #         if all_params["model_params"]["gradient_penalty"] != 0.0:
-    #             all_params["model_params"]["evaluate_frequency"] = 2500
-    #             all_params["model_params"]["num_samples"] = 50000
-    #             all_params["model_params"]["num_iter"] = 100000
+    # all_params = get_adapeg_params(with_svrg=True)
+    # for opt_i in all_params["optimizer_params"]:
+    #     inner_params = {}
+    #     inner_params["model_params"] = all_params["model_params"]
+    #     inner_params["optimizer_params"] = opt_i
     #
-    #             all_params["optimizer_params"]["learning_rate_dis"] = 0.0009
-    #             all_params["optimizer_params"]["learning_rate_gen"] = 0.0009
-    #             all_params["optimizer_params"]["average"] = False
-    #             if all_params["optimizer_params"]["name"] == "adam":
-    #                 all_params["optimizer_params"]["average"] = False
     #
-    #             print(json.dumps(all_params, indent=4))
-    #             with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True) as r:
-    #                 wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
-    #                 run_config(all_params, "cifar10", "testexperiment")
-    #
-    #             print("\n\n")
+    #     inner_params["model_params"]["evaluate_frequency"] = 2500
+    #     inner_params["model_params"]["num_samples"] = 100
+    #     inner_params["model_params"]["num_iter"] = 300000
+    #     inner_params["optimizer_params"]["average"] = False
+    #     print(json.dumps(inner_params, indent=4))
+    #     with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
+    #         run_config(inner_params, "cifar10", "testexperiment")
+
+    include = {"default_dcgan_wgangp_extraadam.json"}
+    for file_name in os.listdir("../config"):
+        if file_name not in include:
+            continue
+        with open(os.path.join("../config", file_name)) as f:
+            all_params = json.load(f)
+        if all_params["model_params"]["model"] != "resnet":
+            if all_params["model_params"]["gradient_penalty"] != 0.0:
+                all_params["model_params"]["evaluate_frequency"] = 2500
+                all_params["model_params"]["num_samples"] = 500
+                all_params["model_params"]["num_iter"] = 100000
+
+                all_params["optimizer_params"]["learning_rate_dis"] = 0.0001
+                all_params["optimizer_params"]["learning_rate_gen"] = 0.0001
+                all_params["optimizer_params"]["average"] = False
+                # if all_params["optimizer_params"]["name"] == "adam":
+                #     all_params["optimizer_params"]["average"] = False
+
+                print(json.dumps(all_params, indent=4))
+                with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
+                    wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
+                    run_config(all_params, "cifar10", "testexperiment")
+
+                print("\n\n")
 
 
 
