@@ -20,6 +20,7 @@
       "name": "extraadam",
       "learning_rate_dis":5e-04,
       "learning_rate_gen":5e-04,
+      "svrg": true,
       "beta2":0.9,
       "beta1":0.5
    }

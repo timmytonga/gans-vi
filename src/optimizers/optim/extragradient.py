@@ -131,10 +131,11 @@ class Extragradient(Optimizer):
                 if p.grad is None:
                     continue
                 param_state = self.state[p]
-                gktbl = param_state['gktbl']
-                gavg = param_state['gavg'].type_as(p.data)
-                gi = gktbl[batch_id, :].cuda()
-                p.grad.data.sub_(gi - gavg)
+                if group["svrg"]:
+                    gktbl = param_state['gktbl']
+                    gavg = param_state['gavg'].type_as(p.data)
+                    gi = gktbl[batch_id, :].cuda()
+                    p.grad.data.sub_(gi - gavg)
                 u = self.update(p, group)
                 if is_empty:
                     # Save the current parameters for the update step. Several extrapolation step can be made before each update but only the parameters before the first extrapolation step are saved.
@@ -165,10 +166,11 @@ class Extragradient(Optimizer):
                     continue
 
                 param_state = self.state[p]
-                gktbl = param_state['gktbl']
-                gavg = param_state['gavg'].type_as(p.data)
-                gi = gktbl[batch_id, :].cuda()
-                p.grad.data.sub_(gi - gavg)
+                if group["svrg"]:
+                    gktbl = param_state['gktbl']
+                    gavg = param_state['gavg'].type_as(p.data)
+                    gi = gktbl[batch_id, :].cuda()
+                    p.grad.data.sub_(gi - gavg)
                 i += 1
                 u = self.update(p, group)
                 if u is None:

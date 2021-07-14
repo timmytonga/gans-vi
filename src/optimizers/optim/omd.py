@@ -65,8 +65,8 @@ class OMD(Optimizer):
 
 
 class OptimisticAdam(Optimizer):
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, amsgrad=False):
+    def __init__(self, params, nbatches, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
+                 weight_decay=0, amsgrad=False, svrg=False):
         if not 0.0 <= lr:
          raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -76,15 +76,88 @@ class OptimisticAdam(Optimizer):
         if not 0.0 <= betas[1] < 1.0:
          raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                     weight_decay=weight_decay, amsgrad=amsgrad)
+                     weight_decay=weight_decay, amsgrad=amsgrad, svrg=svrg)
         super(OptimisticAdam, self).__init__(params, defaults)
+
+        self.params_copy = []
+        m = nbatches
+        for group in self.param_groups:
+            for p in group['params']:
+                gsize = p.data.size()
+                gtbl_size = torch.Size([m] + list(gsize))
+
+                param_state = self.state[p]
+
+                # State initialization
+                if len(param_state) == 0:
+                    param_state['step'] = 0
+                    # Exponential moving average of gradient values
+                    param_state['exp_avg'] = torch.zeros_like(p.data)
+                    # Exponential moving average of squared gradient values
+                    param_state['exp_avg_sq'] = torch.zeros_like(p.data)
+                    if amsgrad:
+                        # Maintains max of all exp. moving avg. of sq. grad. values
+                        param_state['max_exp_avg_sq'] = torch.zeros_like(p.data)
+
+                if 'gktbl' not in param_state:
+                    param_state['gktbl'] = torch.zeros(gtbl_size)
+
+                if 'gavg' not in param_state:
+                    param_state['gavg'] = p.data.clone().double().zero_()
 
     def __setstate__(self, state):
         super(OptimisticAdam, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 
-    def step(self, closure=None):
+    def recalibrate_start(self):
+        """ Part of the recalibration pass with SVRG.
+        Stores the gradients for later use.
+        """
+
+        self.recalibration_i = 0
+
+        for group in self.param_groups:
+            for p in group['params']:
+                param_state = self.state[p]
+                param_state['gavg'].zero_()
+
+                # xk is changed to the running_x
+                # p.data.zero_().add_(param_state['running_x'])
+                # param_state['tilde_x'] = p.data.clone()
+
+    def recalibrate(self, batch_id, closure):
+        """ Part of the recalibration pass with SVRG.
+        Stores the gradients for later use.
+        """
+        loss = closure()
+        # print("recal loss:", loss)
+
+        self.recalibration_i += 1
+        if self.defaults["svrg"] == True:
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is None:
+                        continue
+                    gk = p.grad.data.double()
+
+                    param_state = self.state[p]
+
+                    gktbl = param_state['gktbl']
+                    gavg = param_state['gavg']
+
+                    # pdb.set_trace()
+
+                    # Online mean/variance calcuation from wikipedia
+                    delta = gk - gavg
+                    gavg.add_(1.0 / self.recalibration_i, delta)
+
+                    #########
+                    gktbl[batch_id, :] = p.grad.data.cpu().clone()
+
+        return loss
+
+    def step(self, batch_id, closure=None):
         loss = None
         if closure is not None:
             loss = closure()
@@ -93,6 +166,14 @@ class OptimisticAdam(Optimizer):
             for p in group['params']:
                 if p.grad is None:
                     return None
+
+                if group["svrg"]:
+                    param_state = self.state[p]
+                    gktbl = param_state['gktbl']
+                    gavg = param_state['gavg'].type_as(p.data)
+                    gi = gktbl[batch_id, :].cuda()
+                    p.grad.data.sub_(gi - gavg)
+
                 grad = p.grad.data
                 if grad.is_sparse:
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
@@ -100,16 +181,7 @@ class OptimisticAdam(Optimizer):
 
                 state = self.state[p]
 
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p.data)
-                    # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p.data)
-                    if amsgrad:
-                        # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(p.data)
+
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 if amsgrad:
