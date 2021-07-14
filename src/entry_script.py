@@ -836,7 +836,7 @@ if __name__ == "__main__":
         if all_params["model_params"]["model"] != "resnet":
             if all_params["model_params"]["gradient_penalty"] != 0.0:
                 all_params["model_params"]["evaluate_frequency"] = 2500
-                all_params["model_params"]["num_samples"] = 500
+                all_params["model_params"]["num_samples"] = 25000
                 all_params["model_params"]["num_iter"] = 100000
 
                 all_params["optimizer_params"]["learning_rate_dis"] = 0.0001
@@ -846,7 +846,7 @@ if __name__ == "__main__":
                 #     all_params["optimizer_params"]["average"] = False
 
                 print(json.dumps(all_params, indent=4))
-                with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
+                with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True) as r:
                     wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
                     run_config(all_params, "cifar10", "testexperiment")
 
