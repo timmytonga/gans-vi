@@ -159,9 +159,7 @@ def retrieve_optimizer(opt_dict,
                                                   betas=(opt_dict["beta1"], opt_dict["beta2"]),
                                                   squared_grad=opt_dict["squared_grad"],
                                                   optimistic=opt_dict["optimistic"],
-                                                  model=discriminator,
-                                                  vr_bn_at_recalibration=opt_dict["vr_bn_at_recalibration"],
-                                                  batchnormreset=opt_dict["batchnormreset"])
+                                                  model=discriminator)
 
         gen_optimizer = AdaPEGSVRG.AdaPEGAdamSVRG(generator.parameters(),
                                                   vr_from_epoch=opt_dict["vr_after"],
@@ -171,9 +169,7 @@ def retrieve_optimizer(opt_dict,
                                                   betas=(opt_dict["beta1"], opt_dict["beta2"]),
                                                   squared_grad=opt_dict["squared_grad"],
                                                   optimistic=opt_dict["optimistic"],
-                                                  model=generator,
-                                                  vr_bn_at_recalibration=opt_dict["vr_bn_at_recalibration"],
-                                                  batchnormreset=opt_dict["batchnormreset"])
+                                                  model=generator)
 
     elif opt_name == "adaptive_first":
 
@@ -343,7 +339,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
 
 
-            if optim_params["name"] != "adam" and optim_params["name"] != "adaptive_first" and not optim_params["name"].endswith("svrg"):
+            if optim_params["name"] != "adam" and optim_params["name"] != "adaptive_first":
                 x_gen = generator(z)
                 p_true, p_gen = discriminator(x_true), discriminator(x_gen)
                 gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
@@ -447,6 +443,15 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                 current_iter += 1
 
             loop.set_postfix(**postfix_kwargs)
+
+            if epoch >= 1:
+                dis_variance = dis_optimizer.epoch_diagnostics()
+                gen_variance = gen_optimizer.epoch_diagnostics()
+
+                wandb.log({
+                    "DIS_VARIANCE": dis_variance,
+                    "GEN_VARIANCE": gen_variance
+                })
 
 
             if gen_updates % model_params["evaluate_frequency"] == 0 and o_gen_updates != gen_updates:
