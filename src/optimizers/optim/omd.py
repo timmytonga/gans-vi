@@ -158,6 +158,23 @@ class OptimisticAdam(Optimizer):
 
         return loss
 
+    def store_old_table(self):
+        """
+        Stores the old gradient table for recalibration purposes.
+        """
+
+        for group in self.param_groups:
+            for p in group['params']:
+                gk = p.grad.data
+
+                param_state = self.state[p]
+
+                gktbl = param_state['gktbl']
+                gavg = param_state['gavg']
+
+                param_state['gktbl_old'] = gktbl.clone()
+                param_state['gavg_old'] = gavg.clone()
+
     def epoch_diagnostics(self):
         """
         Called after recalibrate, returns variance

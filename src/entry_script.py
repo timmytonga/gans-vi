@@ -269,7 +269,8 @@ def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=Fals
         if closure is None:
             closure = lambda: loss
             loss.backward(retain_graph=retain_graph)
-        return optimizer.step(batch_id, closure)
+        optimizer.step(batch_id, closure)
+        return 1
 
     else:
         raise RuntimeError("Could not find step procedure for optimizer {}".format(opt_params["name"]))
@@ -296,10 +297,6 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
         gen_param_avg.append(param.data.clone())
         param_temp_holder.append(None)
 
-    if optim_params["name"].endswith("svrg") and optim_params["tail_average"] != 0.0:
-        tail_num_batches = int(optim_params["tail_average"] * len(trainloader))
-        ntail_from = len(trainloader) - tail_num_batches
-
     begin_time = time.time()
     while gen_updates < model_params["num_iter"]:
         penalty = Variable(torch.Tensor([0.]))
@@ -311,6 +308,10 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                 or (optim_params["name"] == "extraadam" and optim_params["svrg"]) \
                 or (optim_params["name"] == "optimisticadam" and optim_params["svrg"]):
             if epoch >= 1:
+                if epoch >= 2:
+                    dis_optimizer.store_old_table()
+                    gen_optimizer.store_old_table()
+
                 recalibrate(model_params=model_params,
                             train_loader=trainloader,
                             generator=generator,
@@ -319,6 +320,14 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                             dis_optimizer=dis_optimizer,
                             device=device)
 
+                if epoch >= 2:
+                    dis_variance = dis_optimizer.epoch_diagnostics()
+                    gen_variance = gen_optimizer.epoch_diagnostics()
+
+                    wandb.log({
+                        "DIS_VARIANCE": dis_variance,
+                        "GEN_VARIANCE": gen_variance
+                    })
 
         for i, data in loop:
             x_true, _ = data
@@ -443,16 +452,6 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                 current_iter += 1
 
             loop.set_postfix(**postfix_kwargs)
-
-            if epoch >= 1:
-                dis_variance = dis_optimizer.epoch_diagnostics()
-                gen_variance = gen_optimizer.epoch_diagnostics()
-
-                wandb.log({
-                    "DIS_VARIANCE": dis_variance,
-                    "GEN_VARIANCE": gen_variance
-                })
-
 
             if gen_updates % model_params["evaluate_frequency"] == 0 and o_gen_updates != gen_updates:
                 o_gen_updates = gen_updates
@@ -838,45 +837,45 @@ if __name__ == "__main__":
     #     run.finish()
 
 
-    # all_params = get_adapeg_params(with_svrg=True)
-    # for opt_i in all_params["optimizer_params"]:
-    #     inner_params = {}
-    #     inner_params["model_params"] = all_params["model_params"]
-    #     inner_params["optimizer_params"] = opt_i
+    all_params = get_adapeg_params(with_svrg=True)
+    for opt_i in all_params["optimizer_params"]:
+        inner_params = {}
+        inner_params["model_params"] = all_params["model_params"]
+        inner_params["optimizer_params"] = opt_i
+
+
+        inner_params["model_params"]["evaluate_frequency"] = 2500
+        inner_params["model_params"]["num_samples"] = 100
+        inner_params["model_params"]["num_iter"] = 300000
+        inner_params["optimizer_params"]["average"] = False
+        print(json.dumps(inner_params, indent=4))
+        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
+            run_config(inner_params, "cifar10", "testexperiment")
+
+    # include = {"default_dcgan_wgangp_optimisticextraadam.json"}
+    # for file_name in os.listdir("../config"):
+    #     if file_name not in include:
+    #         continue
+    #     with open(os.path.join("../config", file_name)) as f:
+    #         all_params = json.load(f)
+    #     if all_params["model_params"]["model"] != "resnet":
+    #         if all_params["model_params"]["gradient_penalty"] != 0.0:
+    #             all_params["model_params"]["evaluate_frequency"] = 1
+    #             all_params["model_params"]["num_samples"] = 500
+    #             all_params["model_params"]["num_iter"] = 100000
     #
+    #             # all_params["optimizer_params"]["learning_rate_dis"] = 0.0001
+    #             # all_params["optimizer_params"]["learning_rate_gen"] = 0.0001
+    #             all_params["optimizer_params"]["average"] = False
+    #             # if all_params["optimizer_params"]["name"] == "adam":
+    #             #     all_params["optimizer_params"]["average"] = False
     #
-    #     inner_params["model_params"]["evaluate_frequency"] = 2500
-    #     inner_params["model_params"]["num_samples"] = 100
-    #     inner_params["model_params"]["num_iter"] = 300000
-    #     inner_params["optimizer_params"]["average"] = False
-    #     print(json.dumps(inner_params, indent=4))
-    #     with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
-    #         run_config(inner_params, "cifar10", "testexperiment")
-
-    include = {"default_dcgan_wgangp_optimisticextraadam.json"}
-    for file_name in os.listdir("../config"):
-        if file_name not in include:
-            continue
-        with open(os.path.join("../config", file_name)) as f:
-            all_params = json.load(f)
-        if all_params["model_params"]["model"] != "resnet":
-            if all_params["model_params"]["gradient_penalty"] != 0.0:
-                all_params["model_params"]["evaluate_frequency"] = 1
-                all_params["model_params"]["num_samples"] = 500
-                all_params["model_params"]["num_iter"] = 100000
-
-                # all_params["optimizer_params"]["learning_rate_dis"] = 0.0001
-                # all_params["optimizer_params"]["learning_rate_gen"] = 0.0001
-                all_params["optimizer_params"]["average"] = False
-                # if all_params["optimizer_params"]["name"] == "adam":
-                #     all_params["optimizer_params"]["average"] = False
-
-                print(json.dumps(all_params, indent=4))
-                with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
-                    wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
-                    run_config(all_params, "cifar10", "testexperiment")
-
-                print("\n\n")
+    #             print(json.dumps(all_params, indent=4))
+    #             with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
+    #                 wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
+    #                 run_config(all_params, "cifar10", "testexperiment")
+    #
+    #             print("\n\n")
 
 
 

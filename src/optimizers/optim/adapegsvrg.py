@@ -55,13 +55,30 @@ class AdaPEGAdamSVRG(Optimizer):
                 if 'gavg' not in param_state:
                     param_state['gavg'] = p.data.clone().double().zero_()
 
+    def store_old_table(self):
+        """
+        Stores the old gradient table for recalibration purposes.
+        """
+
+        for group in self.param_groups:
+            for p in group['params']:
+                gk = p.grad.data
+
+                param_state = self.state[p]
+
+                gktbl = param_state['gktbl']
+                gavg = param_state['gavg']
+
+                param_state['gktbl_old'] = gktbl.clone()
+                param_state['gavg_old'] = gavg.clone()
+
     def recalibrate_start(self):
         """ Part of the recalibration pass with SVRG.
         Stores the gradients for later use.
         """
 
         self.recalibration_i = 0
-
+        self.initialize()
         for group in self.param_groups:
             for p in group['params']:
                 param_state = self.state[p]
@@ -79,26 +96,26 @@ class AdaPEGAdamSVRG(Optimizer):
         # print("recal loss:", loss)
 
         self.recalibration_i += 1
-        if self.defaults["svrg"] == True:
-            for group in self.param_groups:
-                for p in group['params']:
-                    if p.grad is None:
-                        continue
-                    gk = p.grad.data.double()
 
-                    param_state = self.state[p]
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                gk = p.grad.data.double()
 
-                    gktbl = param_state['gktbl']
-                    gavg = param_state['gavg']
+                param_state = self.state[p]
 
-                    # pdb.set_trace()
+                gktbl = param_state['gktbl']
+                gavg = param_state['gavg']
 
-                    # Online mean/variance calcuation from wikipedia
-                    delta = gk - gavg
-                    gavg.add_(1.0 / self.recalibration_i, delta)
+                # pdb.set_trace()
 
-                    #########
-                    gktbl[batch_id, :] = p.grad.data.cpu().clone()
+                # Online mean/variance calcuation from wikipedia
+                delta = gk - gavg
+                gavg.add_(1.0 / self.recalibration_i, delta)
+
+                #########
+                gktbl[batch_id, :] = p.grad.data.cpu().clone()
 
         return loss
 
@@ -186,21 +203,11 @@ class AdaPEGAdamSVRG(Optimizer):
                 gavg = param_state['gavg'].type_as(p.data)
                 gi = gktbl[batch_id, :].cuda()
                 p.grad.data.sub_(gi - gavg)
-                gk = p.grad.data
-                if gk.is_sparse:
+                grad = p.grad.data
+                if grad.is_sparse:
                     raise RuntimeError(
                         'AdaPEGAdam does not support sparse gradients, please consider SparseAdam instead')
                 amsgrad = group['amsgrad']
-
-                param_state = self.state[p]
-
-                gi = param_state['gi']
-                gavg = param_state['gavg']
-
-                if self.epoch >= self.vr_from_epoch:
-                    grad = gk.clone().sub_(gi).add_(gavg.type_as(gk))
-                else:
-                    grad = gk.clone()  # Just do sgd steps
 
                 state = self.state[p]
 
