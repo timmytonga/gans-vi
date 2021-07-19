@@ -8,9 +8,9 @@ required = object()
 
 
 class AdaPEGAdamSVRG(Optimizer):
-    def __init__(self, params, nbatches, model, vr_bn_at_recalibration,
+    def __init__(self, params, nbatches, model,
                  vr_from_epoch, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, amsgrad=False, squared_grad=False, optimistic=False, batchnormreset=False):
+                 weight_decay=0, amsgrad=False, squared_grad=False, optimistic=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -24,17 +24,18 @@ class AdaPEGAdamSVRG(Optimizer):
 
         self.nbatches = nbatches
         self.model = model
-        self.vr_bn_at_recalibration = vr_bn_at_recalibration
         self.vr_from_epoch = vr_from_epoch
         self.batches_processed = 0
         self.epoch = 0
         self.running_tmp = {}
-        self.batchnormreset = batchnormreset
         super(AdaPEGAdamSVRG, self).__init__(params, defaults)
 
     def initialize(self):
         for group in self.param_groups:
             for p in group['params']:
+                gsize = p.data.size()
+                gtbl_size = torch.Size([self.nbatches] + list(gsize))
+
                 param_state = self.state[p]
 
                 # State initialization
@@ -44,87 +45,144 @@ class AdaPEGAdamSVRG(Optimizer):
                     param_state['exp_avg'] = torch.zeros_like(p.data)
                     # Exponential moving average of squared gradient values
                     param_state['exp_avg_sq'] = torch.zeros_like(p.data)
-                    amsgrad = group['amsgrad']
-                    if amsgrad:
+                    if group['amsgrad']:
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         param_state['max_exp_avg_sq'] = torch.zeros_like(p.data)
 
+                if 'gktbl' not in param_state:
+                    param_state['gktbl'] = torch.zeros(gtbl_size)
+
                 if 'gavg' not in param_state:
-                    param_state['gavg'] =  p.data.double().clone().zero_()
-                    param_state['gi'] = p.data.clone().zero_()
-                    param_state['gi_debug'] = p.data.clone().zero_()
+                    param_state['gavg'] = p.data.clone().double().zero_()
 
-                if 'tilde_x' not in param_state:
-                    param_state['tilde_x'] = p.data.clone()
-                    param_state['xk'] = p.data.clone()
+    def store_old_table(self):
+        """
+        Stores the old gradient table for recalibration purposes.
+        """
 
-        # Batch norm's activation running_mean/var variables
-        state = self.model.state_dict()
-        for skey in state.keys():
-            if skey.endswith(".running_mean") or skey.endswith(".running_var"):
-                self.running_tmp[skey] = state[skey].clone()
+        for group in self.param_groups:
+            for p in group['params']:
+                gk = p.grad.data
+
+                param_state = self.state[p]
+
+                gktbl = param_state['gktbl']
+                gavg = param_state['gavg']
+
+                param_state['gktbl_old'] = gktbl.clone()
+                param_state['gavg_old'] = gavg.clone()
 
     def recalibrate_start(self):
         """ Part of the recalibration pass with SVRG.
         Stores the gradients for later use.
         """
-        self.epoch += 1
-        self.recal_calls = 0
+
+        self.recalibration_i = 0
         self.initialize()
-        if self.batchnormreset:
-            self.store_running_mean()
-        print("Recal epoch: {}".format(self.epoch))
+        for group in self.param_groups:
+            for p in group['params']:
+                param_state = self.state[p]
+                param_state['gavg'].zero_()
 
-        if self.epoch >= self.vr_from_epoch:
-            for group in self.param_groups:
-                for p in group['params']:
-                    param_state = self.state[p]
-                    gavg = param_state['gavg']
-                    gavg.zero_()
-
-                    tilde_x = param_state['tilde_x']
-                    tilde_x.zero_().add_(p.data.clone())
-                    #pdb.set_trace()
-
+                # xk is changed to the running_x
+                # p.data.zero_().add_(param_state['running_x'])
+                # param_state['tilde_x'] = p.data.clone()
 
     def recalibrate(self, batch_id, closure):
-        """ Compute part of the full batch gradient, from one minibatch
+        """ Part of the recalibration pass with SVRG.
+        Stores the gradients for later use.
         """
         loss = closure()
+        # print("recal loss:", loss)
 
-        if self.epoch >= self.vr_from_epoch:
-            self.recal_calls += 1
-            for group in self.param_groups:
-                for p in group['params']:
-                    if p.grad is None:
-                        continue
-                    gk = p.grad.data
+        self.recalibration_i += 1
 
-                    param_state = self.state[p]
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                gk = p.grad.data.double()
 
-                    gavg = param_state['gavg']
-                    gavg.add_(1.0/self.nbatches, gk.double())
+                param_state = self.state[p]
+
+                gktbl = param_state['gktbl']
+                gavg = param_state['gavg']
+
+                # pdb.set_trace()
+
+                # Online mean/variance calcuation from wikipedia
+                delta = gk - gavg
+                gavg.add_(1.0 / self.recalibration_i, delta)
+
+                #########
+                gktbl[batch_id, :] = p.grad.data.cpu().clone()
 
         return loss
 
-    def recalibrate_end(self):
-        if self.batchnormreset:
-            self.restore_running_mean()
-        if self.recal_calls != self.nbatches:
-            raise Exception("recalibrate_end called, with {} nbatches: {}".format(
-                            self.recal_calls, self.nbatches))
+    def epoch_diagnostics(self):
+        """
+        Called after recalibrate, returns variance
+        """
+        m = self.nbatches
 
-    def store_running_mean(self):
-        # Store running_mean/var temporarily
-        state = self.model.state_dict()
-        #pdb.set_trace()
-        for skey in self.running_tmp.keys():
-            self.running_tmp[skey].zero_().add_(state[skey])
+        layernum = 0
+        layer_gradient_norm_sqs = []
+        gavg_norm_acum = 0.0
+        gavg_acum = []
+        for group in self.param_groups:
+            for p in group['params']:
 
-    def restore_running_mean(self):
-        state = self.model.state_dict()
-        for skey in self.running_tmp.keys():
-            state[skey].zero_().add_(self.running_tmp[skey])
+                layer_gradient_norm_sqs.append([])
+                gavg = self.state[p]['gavg'].cpu()
+                gavg_acum.append(gavg.numpy())
+                gavg_norm_acum += gavg.norm()**2 #torch.dot(gavg, gavg)
+                layernum += 1
+
+        gradient_norm_sqs = []
+        vr_step_variance = []
+        cos_acums = []
+        variances = []
+
+        for batch_id in range(m):
+            norm_acum = 0.0
+            ginorm_acum = 0.0
+            vr_acum = 0.0
+            layernum = 0
+            cos_acum = 0.0
+            var_acum = 0.0
+            for group in self.param_groups:
+                for p in group['params']:
+                    param_state = self.state[p]
+
+                    gktbl = param_state['gktbl']
+                    gavg = param_state['gavg'].type_as(p.data).cpu()
+
+                    gi = gktbl[batch_id, :]
+                    var_norm_sq = (gi-gavg).norm()**2 #torch.dot(gi-gavg, gi-gavg)
+                    norm_acum += var_norm_sq
+                    ginorm_acum += gi.norm()**2 #torch.dot(gi, gi)
+                    layer_gradient_norm_sqs[layernum].append(var_norm_sq)
+
+                    gktbl_old = param_state['gktbl_old']
+                    gavg_old = param_state['gavg_old'].type_as(p.data).cpu()
+                    gi_old = gktbl_old[batch_id, :]
+                    #pdb.set_trace()
+                    vr_step = gi - gi_old + gavg_old
+                    vr_acum += (vr_step - gavg).norm()**2 #torch.dot(vr_step - gavg, vr_step - gavg)
+                    cos_acum += torch.sum(gavg*gi)
+
+                    var_acum += (gi - gavg).norm()**2
+
+                    layernum += 1
+            gradient_norm_sqs.append(norm_acum)
+            vr_step_variance.append(vr_acum)
+            cosim = cos_acum/math.sqrt(ginorm_acum*gavg_norm_acum)
+            #pdb.set_trace()
+            cos_acums.append(cosim)
+            variances.append(var_acum)
+
+        variance = sum(variances)/len(variances)
+        return variance
 
     def __setstate__(self, state):
         super(AdaPEGAdamSVRG, self).__setstate__(state)
@@ -132,40 +190,6 @@ class AdaPEGAdamSVRG(Optimizer):
             group.setdefault('amsgrad', False)
 
     def step(self, batch_id, closure=None):
-
-
-        if self.epoch >= self.vr_from_epoch:
-            if self.batchnormreset:
-                self.store_running_mean()
-            ## Store current xk, replace with x_tilde
-            for group in self.param_groups:
-                for p in group['params']:
-                    param_state = self.state[p]
-                    xk = param_state['xk']
-                    xk.zero_().add_(p.data)
-                    p.data.zero_().add_(param_state['tilde_x'])
-
-            # Standard is vr_bn_at_recalibration=True, so this doesn't fire.
-            if not self.vr_bn_at_recalibration:
-                self.model.eval() # turn off batch norm
-            ## Compute gradient at x_tilde
-            closure()
-
-            ## Store x_tilde gradient in gi, and revert to xk
-            for group in self.param_groups:
-                for p in group['params']:
-                    if p.grad is None:
-                        continue
-                    param_state = self.state[p]
-                    xk = param_state['xk']
-                    gi = param_state['gi']
-                    gi.zero_().add_(p.grad.data)
-                    p.data.zero_().add_(xk)
-
-            # Make sure batchnorm is handled correctly.
-            if self.batchnormreset:
-                self.restore_running_mean()
-
         loss = None
         if closure is not None:
             loss = closure()
@@ -174,21 +198,16 @@ class AdaPEGAdamSVRG(Optimizer):
             for p in group['params']:
                 if p.grad is None:
                     continue
-                gk = p.grad.data
-                if gk.is_sparse:
+                param_state = self.state[p]
+                gktbl = param_state['gktbl']
+                gavg = param_state['gavg'].type_as(p.data)
+                gi = gktbl[batch_id, :].cuda()
+                p.grad.data.sub_(gi - gavg)
+                grad = p.grad.data
+                if grad.is_sparse:
                     raise RuntimeError(
                         'AdaPEGAdam does not support sparse gradients, please consider SparseAdam instead')
                 amsgrad = group['amsgrad']
-
-                param_state = self.state[p]
-
-                gi = param_state['gi']
-                gavg = param_state['gavg']
-
-                if self.epoch >= self.vr_from_epoch:
-                    grad = gk.clone().sub_(gi).add_(gavg.type_as(gk))
-                else:
-                    grad = gk.clone()  # Just do sgd steps
 
                 state = self.state[p]
 
