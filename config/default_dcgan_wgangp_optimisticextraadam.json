@@ -20,6 +20,7 @@
         "name": "optimisticadam",
         "beta1": 0.5,
         "learning_rate_dis": 0.0005,
-        "learning_rate_gen": 0.0005
+        "learning_rate_gen": 0.0005,
+        "svrg": false
     }
 }

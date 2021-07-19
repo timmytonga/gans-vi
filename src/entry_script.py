@@ -18,6 +18,7 @@ import time
 
 from torch.autograd import Variable
 from torch.nn import functional as F
+from cleanfid import fid as cfid
 
 from models.dcgan import DCGAN32Generator, DCGAN32Discriminator
 from models.resnet import ResNet32Generator, ResNet32Discriminator
@@ -99,12 +100,12 @@ def retrieve_optimizer(opt_dict,
         dis_optimizer = ExtraGradient.ExtraAdam(discriminator.parameters(),
                                                 lr=opt_dict["learning_rate_dis"],
                                                 betas=(opt_dict["beta1"], opt_dict["beta2"]),
-                                                svrg=True,
+                                                svrg=opt_dict["svrg"],
                                                 nbatches=n_train)
         gen_optimizer = ExtraGradient.ExtraAdam(generator.parameters(),
                                                 lr=opt_dict["learning_rate_gen"],
                                                 betas=(opt_dict["beta1"], opt_dict["beta2"]),
-                                                svrg=True,
+                                                svrg=opt_dict["svrg"],
                                                 nbatches=n_train)
     elif opt_dict["name"] == "adapeg":
         dis_optimizer = AdaPEG.AdaPEGAdam(discriminator.parameters(),
@@ -120,10 +121,14 @@ def retrieve_optimizer(opt_dict,
     elif opt_dict["name"] == "optimisticadam":
         dis_optimizer = OMD.OptimisticAdam(discriminator.parameters(),
                                            lr=opt_dict["learning_rate_dis"],
-                                           betas=(opt_dict["beta1"], opt_dict["beta2"]))
+                                           betas=(opt_dict["beta1"], opt_dict["beta2"]),
+                                           nbatches=n_train,
+                                           svrg=opt_dict["svrg"])
         gen_optimizer = OMD.OptimisticAdam(generator.parameters(),
                                            lr=opt_dict["learning_rate_gen"],
-                                           betas=(opt_dict["beta1"], opt_dict["beta2"]))
+                                           betas=(opt_dict["beta1"], opt_dict["beta2"]),
+                                           nbatches=n_train,
+                                           svrg=opt_dict["svrg"])
     elif opt_dict["name"] == "adam":
         dis_optimizer = torch.optim.Adam(discriminator.parameters(),
                                          lr=opt_dict["learning_rate_dis"],
@@ -155,7 +160,8 @@ def retrieve_optimizer(opt_dict,
                                                   squared_grad=opt_dict["squared_grad"],
                                                   optimistic=opt_dict["optimistic"],
                                                   model=discriminator,
-                                                  vr_bn_at_recalibration=opt_dict["vr_bn_at_recalibration"])
+                                                  vr_bn_at_recalibration=opt_dict["vr_bn_at_recalibration"],
+                                                  batchnormreset=opt_dict["batchnormreset"])
 
         gen_optimizer = AdaPEGSVRG.AdaPEGAdamSVRG(generator.parameters(),
                                                   vr_from_epoch=opt_dict["vr_after"],
@@ -166,7 +172,8 @@ def retrieve_optimizer(opt_dict,
                                                   squared_grad=opt_dict["squared_grad"],
                                                   optimistic=opt_dict["optimistic"],
                                                   model=generator,
-                                                  vr_bn_at_recalibration=opt_dict["vr_bn_at_recalibration"])
+                                                  vr_bn_at_recalibration=opt_dict["vr_bn_at_recalibration"],
+                                                  batchnormreset=opt_dict["batchnormreset"])
 
     elif opt_name == "adaptive_first":
 
@@ -223,7 +230,11 @@ def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=Fals
         else:
             optimizer.step(batch_id)
             return 1
-    elif opt_params["name"] == "pastadam" or opt_params["name"] == "optimisticadam" or opt_params["name"] == "adapeg":
+    elif opt_params["name"] == "optimisticadam":
+        loss.backward(retain_graph=retain_graph)
+        optimizer.step(batch_id)
+        return 1
+    elif opt_params["name"] == "pastadam" or opt_params["name"] == "adapeg":
         loss.backward(retain_graph=retain_graph)
         optimizer.step()
         return 1
@@ -300,8 +311,9 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
         loop = tqdm.tqdm(enumerate(trainloader), total=len(trainloader), leave=False)
 
         loop.set_description(f"EPOCH: {epoch}")
-        averaged_so_far = 0
-        if optim_params["name"].endswith("svrg") or optim_params["name"] == "extraadam":
+        if optim_params["name"].endswith("svrg") \
+                or (optim_params["name"] == "extraadam" and optim_params["svrg"]) \
+                or (optim_params["name"] == "optimisticadam" and optim_params["svrg"]):
             if epoch >= 1:
                 recalibrate(model_params=model_params,
                             train_loader=trainloader,
@@ -445,16 +457,27 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                         param_temp_holder[j] = param.data
                         param.data = gen_param_avg[j]
 
-                all_samples = []
-                samples = torch.randn(model_params["num_samples"], model_params["num_latent"])
-                for i in range(0, model_params["num_samples"], 100):
-                    samples_100 = samples[i:i+100].to(device=device)
-                    all_samples.append(generator(samples_100).cpu().data.numpy())
-
-                all_samples = np.concatenate(all_samples, axis=0)
+                # all_samples = []
+                # samples = torch.randn(model_params["num_samples"], model_params["num_latent"])
+                # for i in range(0, model_params["num_samples"], 100):
+                #     samples_100 = samples[i:i+100].to(device=device)
+                #     all_samples.append(generator(samples_100).cpu().data.numpy())
+                #
+                # all_samples = np.concatenate(all_samples, axis=0)
                 # all_samples = np.multiply(np.add(np.multiply(all_samples, 0.5), 0.5), 255).astype('int32')
 
-                inc_is = calculate_fid_given_paths(all_samples, batch_size=100, device=device, dims=2048)
+                # inc_is = calculate_fid_given_paths(all_samples, batch_size=100, device=device, dims=2048)
+                def gen_lambda(z_batch):
+                    unnorm_imgs = generator(z_batch)
+                    return torch.multiply(torch.add(torch.multiply(unnorm_imgs, 0.5), 0.5), 255).type(torch.int)
+                inc_is = cfid.compute_fid(gen=gen_lambda,
+                                          dataset_name="cifar10",
+                                          dataset_res=32,
+                                          z_dim=model_params["num_latent"],
+                                          device=device,
+                                          batch_size=100,
+                                          num_gen=model_params["num_samples"],
+                                          mode="legacy_pytorch")
 
                 ex_arr = generator(utils.sample(model_params["distribution"], (100, model_params["num_latent"])).to(device=device))
                 ex_images = utils.unormalize(ex_arr)
@@ -721,7 +744,6 @@ def get_adapeg_params(with_svrg=False):
                 "optimistic": True,
                 'lr_reduction': "none",
                 "vr_after": 1,
-                "tail_average": 0.0,
                 "weight_decay": 0,
                 "vr_bn_at_recalibration": True
             }
@@ -812,45 +834,45 @@ if __name__ == "__main__":
 
 
 
-    # all_params = get_adapeg_params(with_svrg=True)
-    # for opt_i in all_params["optimizer_params"]:
-    #     inner_params = {}
-    #     inner_params["model_params"] = all_params["model_params"]
-    #     inner_params["optimizer_params"] = opt_i
+    all_params = get_adapeg_params(with_svrg=False)
+    for opt_i in all_params["optimizer_params"]:
+        inner_params = {}
+        inner_params["model_params"] = all_params["model_params"]
+        inner_params["optimizer_params"] = opt_i
+
+        inner_params["model_params"]["evaluate_frequency"] = 2500
+        inner_params["model_params"]["num_samples"] = 25000
+        inner_params["model_params"]["num_iter"] = 100000
+        inner_params["optimizer_params"]["average"] = False
+        print(json.dumps(inner_params, indent=4))
+        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
+            run_config(inner_params, "cifar10", "testexperiment")
+
+    # include = {"default_dcgan_wgangp_optimisticextraadam.json", "default_dcgan_wgangp_extraadam.json"}
+    # for file_name in os.listdir("../config"):
+    #     if file_name not in include:
+    #         continue
+    #     with open(os.path.join("../config", file_name)) as f:
+    #         all_params = json.load(f)
+    #     if all_params["model_params"]["model"] != "resnet":
+    #         if all_params["model_params"]["gradient_penalty"] != 0.0:
     #
+    #             all_params["model_params"]["evaluate_frequency"] = 2500
+    #             all_params["model_params"]["num_samples"] = 25000
+    #             all_params["model_params"]["num_iter"] = 100000
     #
-    #     inner_params["model_params"]["evaluate_frequency"] = 2500
-    #     inner_params["model_params"]["num_samples"] = 100
-    #     inner_params["model_params"]["num_iter"] = 300000
-    #     inner_params["optimizer_params"]["average"] = False
-    #     print(json.dumps(inner_params, indent=4))
-    #     with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
-    #         run_config(inner_params, "cifar10", "testexperiment")
-
-    include = {"default_dcgan_wgangp_extraadam.json"}
-    for file_name in os.listdir("../config"):
-        if file_name not in include:
-            continue
-        with open(os.path.join("../config", file_name)) as f:
-            all_params = json.load(f)
-        if all_params["model_params"]["model"] != "resnet":
-            if all_params["model_params"]["gradient_penalty"] != 0.0:
-                all_params["model_params"]["evaluate_frequency"] = 2500
-                all_params["model_params"]["num_samples"] = 25000
-                all_params["model_params"]["num_iter"] = 100000
-
-                all_params["optimizer_params"]["learning_rate_dis"] = 0.0001
-                all_params["optimizer_params"]["learning_rate_gen"] = 0.0001
-                all_params["optimizer_params"]["average"] = False
-                # if all_params["optimizer_params"]["name"] == "adam":
-                #     all_params["optimizer_params"]["average"] = False
-
-                print(json.dumps(all_params, indent=4))
-                with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True) as r:
-                    wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
-                    run_config(all_params, "cifar10", "testexperiment")
-
-                print("\n\n")
+    #             # all_params["optimizer_params"]["learning_rate_dis"] = 0.0001
+    #             # all_params["optimizer_params"]["learning_rate_gen"] = 0.0001
+    #             all_params["optimizer_params"]["average"] = False
+    #             # if all_params["optimizer_params"]["name"] == "adam":
+    #             #     all_params["optimizer_params"]["average"] = False
+    #
+    #             print(json.dumps(all_params, indent=4))
+    #             with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True) as r:
+    #                 wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
+    #                 run_config(all_params, "cifar10", "testexperiment")
+    #
+    #             print("\n\n")
 
 
 

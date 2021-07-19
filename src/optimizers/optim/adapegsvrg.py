@@ -10,7 +10,7 @@ required = object()
 class AdaPEGAdamSVRG(Optimizer):
     def __init__(self, params, nbatches, model, vr_bn_at_recalibration,
                  vr_from_epoch, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, amsgrad=False, squared_grad=False, optimistic=False):
+                 weight_decay=0, amsgrad=False, squared_grad=False, optimistic=False, batchnormreset=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -29,6 +29,7 @@ class AdaPEGAdamSVRG(Optimizer):
         self.batches_processed = 0
         self.epoch = 0
         self.running_tmp = {}
+        self.batchnormreset = batchnormreset
         super(AdaPEGAdamSVRG, self).__init__(params, defaults)
 
     def initialize(self):
@@ -70,7 +71,8 @@ class AdaPEGAdamSVRG(Optimizer):
         self.epoch += 1
         self.recal_calls = 0
         self.initialize()
-        self.store_running_mean()
+        if self.batchnormreset:
+            self.store_running_mean()
         print("Recal epoch: {}".format(self.epoch))
 
         if self.epoch >= self.vr_from_epoch:
@@ -106,7 +108,8 @@ class AdaPEGAdamSVRG(Optimizer):
         return loss
 
     def recalibrate_end(self):
-        self.restore_running_mean()
+        if self.batchnormreset:
+            self.restore_running_mean()
         if self.recal_calls != self.nbatches:
             raise Exception("recalibrate_end called, with {} nbatches: {}".format(
                             self.recal_calls, self.nbatches))
@@ -132,7 +135,8 @@ class AdaPEGAdamSVRG(Optimizer):
 
 
         if self.epoch >= self.vr_from_epoch:
-            self.store_running_mean()
+            if self.batchnormreset:
+                self.store_running_mean()
             ## Store current xk, replace with x_tilde
             for group in self.param_groups:
                 for p in group['params']:
@@ -159,7 +163,8 @@ class AdaPEGAdamSVRG(Optimizer):
                     p.data.zero_().add_(xk)
 
             # Make sure batchnorm is handled correctly.
-            self.restore_running_mean()
+            if self.batchnormreset:
+                self.restore_running_mean()
 
         loss = None
         if closure is not None:
