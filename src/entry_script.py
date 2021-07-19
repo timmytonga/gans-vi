@@ -29,6 +29,7 @@ from vr_dataloader.cifar_wrapper import CIFAR10_Wrapper
 from vr_dataloader.UpdatedDataLoader import DataLoader
 from vr_dataloader.vr_sampler import VRSampler
 
+
 def inception_score(imgs, cuda=True, batch_size=100, resize=False, splits=1):
     """Computes the inception score of the generated images imgs
     imgs -- Torch dataset of (3xHxW) numpy images normalized in the range [-1, 1]
@@ -57,6 +58,7 @@ def inception_score(imgs, cuda=True, batch_size=100, resize=False, splits=1):
     inception_model.eval()
 
     up = torch.nn.Upsample(size=(299, 299), mode='bilinear').type(dtype)
+
     def get_pred(x):
         if resize:
             x = up(x)
@@ -72,7 +74,7 @@ def inception_score(imgs, cuda=True, batch_size=100, resize=False, splits=1):
         batch_size_i = batch.size()[0]
 
         with torch.no_grad():
-            preds[i*batch_size:i*batch_size + batch_size_i] = get_pred(batchv)
+            preds[i * batch_size:i * batch_size + batch_size_i] = get_pred(batchv)
 
     # Now compute the mean kl-div
     split_scores = []
@@ -174,43 +176,43 @@ def retrieve_optimizer(opt_dict,
     elif opt_name == "adaptive_first":
 
         gen_optimizer = adasls.AdaSLS(generator.parameters(),
-                     c=opt_dict['c'],
-                     n_batches_per_epoch=n_batches_per_epoch,
-                     gv_option=opt_dict.get('gv_option', 'per_param'),
-                     base_opt=opt_dict['base_opt'],
-                     pp_norm_method=opt_dict['pp_norm_method'],
-                     momentum=opt_dict.get('momentum', 0),
-                     beta=opt_dict.get('beta', 0.99),
-                     gamma=opt_dict.get('gamma', 2),
-                     init_step_size=opt_dict.get('init_step_size', 1),
-                     adapt_flag=opt_dict.get('adapt_flag', 'constant'),
-                     step_size_method=opt_dict['step_size_method'],
-                     # sls stuff
-                     beta_b=opt_dict.get('beta_b', .9),
-                     beta_f=opt_dict.get('beta_f', 2.),
-                     reset_option=opt_dict.get('reset_option', 1),
-                     line_search_fn=opt_dict.get('line_search_fn', "armijo"),
-                     mom_type=opt_dict.get('mom_type', "standard"),
-                     )
+                                      c=opt_dict['c'],
+                                      n_batches_per_epoch=n_batches_per_epoch,
+                                      gv_option=opt_dict.get('gv_option', 'per_param'),
+                                      base_opt=opt_dict['base_opt'],
+                                      pp_norm_method=opt_dict['pp_norm_method'],
+                                      momentum=opt_dict.get('momentum', 0),
+                                      beta=opt_dict.get('beta', 0.99),
+                                      gamma=opt_dict.get('gamma', 2),
+                                      init_step_size=opt_dict.get('init_step_size', 1),
+                                      adapt_flag=opt_dict.get('adapt_flag', 'constant'),
+                                      step_size_method=opt_dict['step_size_method'],
+                                      # sls stuff
+                                      beta_b=opt_dict.get('beta_b', .9),
+                                      beta_f=opt_dict.get('beta_f', 2.),
+                                      reset_option=opt_dict.get('reset_option', 1),
+                                      line_search_fn=opt_dict.get('line_search_fn', "armijo"),
+                                      mom_type=opt_dict.get('mom_type', "standard"),
+                                      )
         dis_optimizer = adasls.AdaSLS(discriminator.parameters(),
-                     c=opt_dict['c'],
-                     n_batches_per_epoch=n_batches_per_epoch,
-                     gv_option=opt_dict.get('gv_option', 'per_param'),
-                     base_opt=opt_dict['base_opt'],
-                     pp_norm_method=opt_dict['pp_norm_method'],
-                     momentum=opt_dict.get('momentum', 0),
-                     beta=opt_dict.get('beta', 0.99),
-                     gamma=opt_dict.get('gamma', 2),
-                     init_step_size=opt_dict.get('init_step_size', 1),
-                     adapt_flag=opt_dict.get('adapt_flag', 'constant'),
-                     step_size_method=opt_dict['step_size_method'],
-                     # sls stuff
-                     beta_b=opt_dict.get('beta_b', .9),
-                     beta_f=opt_dict.get('beta_f', 2.),
-                     reset_option=opt_dict.get('reset_option', 1),
-                     line_search_fn=opt_dict.get('line_search_fn', "armijo"),
-                     mom_type=opt_dict.get('mom_type', "standard"),
-                     )
+                                      c=opt_dict['c'],
+                                      n_batches_per_epoch=n_batches_per_epoch,
+                                      gv_option=opt_dict.get('gv_option', 'per_param'),
+                                      base_opt=opt_dict['base_opt'],
+                                      pp_norm_method=opt_dict['pp_norm_method'],
+                                      momentum=opt_dict.get('momentum', 0),
+                                      beta=opt_dict.get('beta', 0.99),
+                                      gamma=opt_dict.get('gamma', 2),
+                                      init_step_size=opt_dict.get('init_step_size', 1),
+                                      adapt_flag=opt_dict.get('adapt_flag', 'constant'),
+                                      step_size_method=opt_dict['step_size_method'],
+                                      # sls stuff
+                                      beta_b=opt_dict.get('beta_b', .9),
+                                      beta_f=opt_dict.get('beta_f', 2.),
+                                      reset_option=opt_dict.get('reset_option', 1),
+                                      line_search_fn=opt_dict.get('line_search_fn', "armijo"),
+                                      mom_type=opt_dict.get('mom_type', "standard"),
+                                      )
     else:
         raise AssertionError("Failed to retrieve optimizer: No optimizer of name {}", opt_dict["name"])
 
@@ -277,12 +279,12 @@ def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=Fals
 
 
 def runner(trainloader, generator, discriminator, optim_params, model_params, device):
-
     if optim_params["name"].endswith("svrg"):
         training_dataset = trainloader[1]
         trainloader = trainloader[0]
 
-    dis_optimizer, gen_optimizer = retrieve_optimizer(optim_params, generator, discriminator, len(trainloader), model_params["batch_size"])
+    dis_optimizer, gen_optimizer = retrieve_optimizer(optim_params, generator, discriminator, len(trainloader),
+                                                      model_params["batch_size"])
     print("Training Optimizer ({}) on ({})".format(optim_params["name"], model_params["model"]))
 
     gen_updates = 0
@@ -308,7 +310,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                 or (optim_params["name"] == "extraadam" and optim_params["svrg"]) \
                 or (optim_params["name"] == "optimisticadam" and optim_params["svrg"]):
             if epoch >= 1:
-                if epoch >= 2:
+                if epoch >= 2 and (epoch + 1) % model_params["var_evaluate_frequency"] == 0:
                     dis_optimizer.store_old_table()
                     gen_optimizer.store_old_table()
 
@@ -320,7 +322,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                             dis_optimizer=dis_optimizer,
                             device=device)
 
-                if epoch >= 2:
+                if epoch >= 2 and epoch % model_params["var_evaluate_frequency"] == 0:
                     dis_variance = dis_optimizer.epoch_diagnostics()
                     gen_variance = gen_optimizer.epoch_diagnostics()
 
@@ -333,7 +335,8 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
             x_true, _ = data
             x_true = torch.autograd.Variable(x_true)
 
-            z = torch.autograd.Variable(utils.sample(model_params["distribution"], (len(x_true), model_params["num_latent"])))
+            z = torch.autograd.Variable(
+                utils.sample(model_params["distribution"], (len(x_true), model_params["num_latent"])))
             x_true = x_true.to(device)
             z = z.to(device)
 
@@ -345,18 +348,15 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                     for p in discriminator.parameters():
                         p.data.clamp_(-model_params["CLIP"], model_params["CLIP"])
 
-
-
-
             if optim_params["name"] != "adam" and optim_params["name"] != "adaptive_first":
                 x_gen = generator(z)
                 p_true, p_gen = discriminator(x_true), discriminator(x_gen)
                 gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
                 dis_loss = - gen_loss.clone()
 
-                postfix_kwargs = {"GEN_UPDATE":"{}/{}".format(gen_updates, model_params["num_iter"]),
-                                 "DISLOSS": dis_loss.item(),
-                                 "GENLOSS":gen_loss.item()}
+                postfix_kwargs = {"GEN_UPDATE": "{}/{}".format(gen_updates, model_params["num_iter"]),
+                                  "DISLOSS": dis_loss.item(),
+                                  "GENLOSS": gen_loss.item()}
 
                 if model_params["gradient_penalty"] != 0:
                     penalty = discriminator.get_penalty(x_true.data, x_gen.data)
@@ -368,7 +368,8 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
                 dis_optimizer.zero_grad()
 
-                step(optim_params, dis_optimizer, current_iter, dis_loss, epoch, optim_params["learning_rate_dis"], i, retain_graph=True)
+                step(optim_params, dis_optimizer, current_iter, dis_loss, epoch, optim_params["learning_rate_dis"], i,
+                     retain_graph=True)
 
                 # Generaator Update
                 for p in generator.parameters():
@@ -379,10 +380,12 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
                 gen_optimizer.zero_grad()
 
-                gen_updates += step(optim_params, gen_optimizer, current_iter, gen_loss, epoch, optim_params["learning_rate_gen"], i)
+                gen_updates += step(optim_params, gen_optimizer, current_iter, gen_loss, epoch,
+                                    optim_params["learning_rate_gen"], i)
 
                 for param_i, param in enumerate(generator.parameters()):
-                    gen_param_avg[param_i] = gen_param_avg[param_i] * gen_updates / (gen_updates + 1.) + param.data.clone() / (gen_updates + 1.)
+                    gen_param_avg[param_i] = gen_param_avg[param_i] * gen_updates / (
+                                gen_updates + 1.) + param.data.clone() / (gen_updates + 1.)
 
                 for p in discriminator.parameters():
                     p.requires_grad = True
@@ -395,8 +398,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
             else:
 
-
-                if model_params["update_frequency"] == 1 or (current_iter+1)%model_params["update_frequency"] != 0:
+                if model_params["update_frequency"] == 1 or (current_iter + 1) % model_params["update_frequency"] != 0:
                     for p in generator.parameters():
                         p.requires_grad = False
 
@@ -412,7 +414,10 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                             dis_lossc += penalty * model_params["gradient_penalty"]
                         dis_lossc.backward(retain_graph=retain_graph_param)
                         return dis_lossc
-                    rdiss_loss = step(optim_params, dis_optimizer, current_iter, None, epoch, optim_params["learning_rate_dis"], i, retain_graph=retain_graph_param, closure=dis_closure)
+
+                    rdiss_loss = step(optim_params, dis_optimizer, current_iter, None, epoch,
+                                      optim_params["learning_rate_dis"], i, retain_graph=retain_graph_param,
+                                      closure=dis_closure)
                     postfix_kwargs["DISLOSS"] = rdiss_loss.item()
 
                     if model_params["mode"] == "wgan" and model_params["gradient_penalty"] == 0.0:
@@ -422,7 +427,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                     for p in generator.parameters():
                         p.requires_grad = True
 
-                if model_params["update_frequency"] == 1 or (current_iter+1)%model_params["update_frequency"] == 0:
+                if model_params["update_frequency"] == 1 or (current_iter + 1) % model_params["update_frequency"] == 0:
                     for p in discriminator.parameters():
                         p.requires_grad = False
 
@@ -434,13 +439,13 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                         gen_loss.backward()
                         return gen_loss
 
-
-                    rgen_loss = step(optim_params, gen_optimizer, current_iter, None, epoch, optim_params["learning_rate_gen"], i, closure=gen_closure)
+                    rgen_loss = step(optim_params, gen_optimizer, current_iter, None, epoch,
+                                     optim_params["learning_rate_gen"], i, closure=gen_closure)
                     postfix_kwargs["GENLOSS"] = rgen_loss.item()
 
-
                     for param_i, param in enumerate(generator.parameters()):
-                        gen_param_avg[param_i] = gen_param_avg[param_i] * gen_updates / (gen_updates + 1.) + param.data.clone()/(gen_updates + 1.)
+                        gen_param_avg[param_i] = gen_param_avg[param_i] * gen_updates / (
+                                    gen_updates + 1.) + param.data.clone() / (gen_updates + 1.)
 
                     for p in discriminator.parameters():
                         p.requires_grad = True
@@ -474,6 +479,7 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                 def gen_lambda(z_batch):
                     unnorm_imgs = generator(z_batch)
                     return torch.multiply(torch.add(torch.multiply(unnorm_imgs, 0.5), 0.5), 255).type(torch.int)
+
                 inc_is = cfid.compute_fid(gen=gen_lambda,
                                           dataset_name="cifar10",
                                           dataset_res=32,
@@ -483,17 +489,18 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                                           num_gen=model_params["num_samples"],
                                           mode="legacy_pytorch")
 
-                ex_arr = generator(utils.sample(model_params["distribution"], (100, model_params["num_latent"])).to(device=device))
+                ex_arr = generator(
+                    utils.sample(model_params["distribution"], (100, model_params["num_latent"])).to(device=device))
                 ex_images = utils.unormalize(ex_arr)
                 wlogdic = {"INCEPTION_SCORE": inc_is,
                            "PASSED_TIME": time.time() - begin_time,
-                           "examples": [wandb.Image(utils.image_data(ex_images.data, 10), caption=f"GEN_UPDATE {gen_updates} examples")]}
+                           "examples": [wandb.Image(utils.image_data(ex_images.data, 10),
+                                                    caption=f"GEN_UPDATE {gen_updates} examples")]}
                 wandb.log(wlogdic)
 
                 if optim_params["average"]:
                     for j, param in enumerate(generator.parameters()):
                         param.data = param_temp_holder[j]
-
 
         epoch += 1
         if optim_params["name"].endswith("svrg"):
@@ -506,7 +513,6 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
         "optim_config": optim_params
     }, os.path.join("outdir", f"gen_params_{optim_name}_{int(begin_time)}.ckpt"))
     # wandb.save(os.path.join("outdir", "gen_params.ckpt"))
-
 
 
 def run_config(all_params, dataset: str, experiment_name: str):
@@ -545,15 +551,13 @@ def run_config(all_params, dataset: str, experiment_name: str):
                             "t{}".format(datetime.datetime.now().strftime("%Y%m%d%H%M%S")))
     output_dir = os.path.join(OUTDIR, dir_name)
 
-
     def setup_dirs():
         if not os.path.exists(OUTDIR):
             os.mkdir(OUTDIR)
         print(f"Making output directory {output_dir}")
         os.makedirs(output_dir, exist_ok=True)
 
-    #setup_dirs()
-
+    # setup_dirs()
 
     def get_dataset(name: str, train: bool):
         dataset_dir = os.path.join(DATADIR, name)
@@ -584,8 +588,6 @@ def run_config(all_params, dataset: str, experiment_name: str):
                 transform = transforms.Compose([transforms.ToTensor(),
                                                 transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
 
-
-
                 dset = torchvision.datasets.CIFAR10(root=dataset_dir,
                                                     train=train,
                                                     transform=transform,
@@ -596,7 +598,6 @@ def run_config(all_params, dataset: str, experiment_name: str):
                                                       num_workers=1)
 
                 return dloader
-
 
     training_set = get_dataset(dataset, True)
 
@@ -658,7 +659,6 @@ def retrieve_line_search_paper_parameters():
                                                 'step_size_method': 'sls',
                                                 'reset_option': reset_option}]
 
-
     # 2. Adaptive + SPS / Only Armijo
     base_opt_list = ['adam', 'amsgrad', 'adagrad']
 
@@ -703,7 +703,7 @@ def retrieve_line_search_paper_parameters():
     return opt_list + adaptive_first_sls_lipschitz_list + adaptive_first_sls_lipschitz_list + adaptive_first_sps_list
 
 
-def get_adapeg_params(with_svrg=False):
+def get_adapeg_params():
     params = {
         "model_params": {
             "batch_size": 64,
@@ -711,48 +711,48 @@ def get_adapeg_params(with_svrg=False):
             "num_iter": 500000,
             "ema": 0.9999,
             "num_latent": 128,
-            "batchnorm_dis": False,
-            "optimizer": "adam",
+            "batchnorm_dis": True,
             "clip": 0.01,
-            "gradient_penalty": 10,
+            "gradient_penalty": 0,
             "mode": "wgan",
             "seed": 1318,
             "distribution": "normal",
             "initialization": "normal",
             "num_filters_gen": 64,
-            "num_filters_dis": 64,
-            "update_frequency": 1
+            "num_filters_dis": 64
         },
         "optimizer_params": []
     }
 
     for lr in [0.0001]:
-        if not with_svrg:
-            optim_param_base = {
-                "name": "adapeg",
-                "learning_rate_dis":lr,
-                "learning_rate_gen":lr,
-                "beta2":0.9,
-                "beta1":0.5,
-                "squared_grad": True,
-                "optimistic": False
-            }
-        else:
-            optim_param_base = {
-                "name": "adapegsvrg",
-                "learning_rate_dis": lr,
-                "learning_rate_gen": lr,
-                "beta2": 0.9,
-                "beta1": 0.5,
-                "squared_grad": True,
-                "optimistic": True,
-                'lr_reduction': "none",
-                "vr_after": 1,
-                "weight_decay": 0,
-                "vr_bn_at_recalibration": True
-            }
+        for svrg_flag in [True, False]:
+            for optimistic_flag in [True, False]:
+                if svrg_flag:
+                    optim_param_base = {
+                        "name": "adapegsvrg",
+                        "learning_rate_dis": lr,
+                        "learning_rate_gen": lr,
+                        "beta2": 0.9,
+                        "beta1": 0.5,
+                        "squared_grad": True,
+                        "optimistic": optimistic_flag,
+                        'lr_reduction': "none",
+                        "vr_after": 1,
+                        "weight_decay": 0,
+                        "vr_bn_at_recalibration": True
+                    }
+                else:
+                    optim_param_base = {
+                        "name": "adapeg",
+                        "learning_rate_dis": lr,
+                        "learning_rate_gen": lr,
+                        "beta2": 0.9,
+                        "beta1": 0.5,
+                        "squared_grad": True,
+                        "optimistic": optimistic_flag,
+                    }
 
-        params["optimizer_params"].append(optim_param_base)
+                params["optimizer_params"].append(optim_param_base)
 
     # for lr in [0.001, 0.00001]:
     #     optim_param_base = {
@@ -810,7 +810,7 @@ def get_svrg_hyperparameters():
 
 if __name__ == "__main__":
 
-    #torch.autograd.set_detect_anomaly(True)
+    # torch.autograd.set_detect_anomaly(True)
     if not torch.cuda.is_available():
         print("CUDA is not enabled; enable CUDA for pytorch in order to run script")
         exit()
@@ -836,47 +836,46 @@ if __name__ == "__main__":
     #
     #     run.finish()
 
-
-    all_params = get_adapeg_params(with_svrg=True)
+    all_params = get_adapeg_params()
     for opt_i in all_params["optimizer_params"]:
         inner_params = {}
         inner_params["model_params"] = all_params["model_params"]
         inner_params["optimizer_params"] = opt_i
 
 
-        inner_params["model_params"]["evaluate_frequency"] = 2500
-        inner_params["model_params"]["num_samples"] = 100
-        inner_params["model_params"]["num_iter"] = 300000
+        inner_params["model_params"]["evaluate_frequency"] = 10000
+        inner_params["model_params"]["var_evaluate_frequency"] = 20
+        inner_params["model_params"]["num_samples"] = 25000
+        inner_params["model_params"]["num_iter"] = 200000
         inner_params["optimizer_params"]["average"] = False
         print(json.dumps(inner_params, indent=4))
-        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
+        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
             run_config(inner_params, "cifar10", "testexperiment")
 
-    # include = {"default_dcgan_wgangp_optimisticextraadam.json"}
-    # for file_name in os.listdir("../config"):
-    #     if file_name not in include:
-    #         continue
-    #     with open(os.path.join("../config", file_name)) as f:
-    #         all_params = json.load(f)
-    #     if all_params["model_params"]["model"] != "resnet":
-    #         if all_params["model_params"]["gradient_penalty"] != 0.0:
 
-    #             all_params["model_params"]["evaluate_frequency"] = 1
-    #             all_params["model_params"]["num_samples"] = 500
-    #             all_params["model_params"]["num_iter"] = 100000
-    #
-    #             # all_params["optimizer_params"]["learning_rate_dis"] = 0.0001
-    #             # all_params["optimizer_params"]["learning_rate_gen"] = 0.0001
-    #             all_params["optimizer_params"]["average"] = False
-    #             # if all_params["optimizer_params"]["name"] == "adam":
-    #             #     all_params["optimizer_params"]["average"] = False
-    #
-    #             print(json.dumps(all_params, indent=4))
-    #             with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True, mode="disabled") as r:
-    #                 wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
-    #                 run_config(all_params, "cifar10", "testexperiment")
-    #
-    #             print("\n\n")
+    include = {"default_dcgan_wgan_optimisticadam.json"}
+    for file_name in os.listdir("../config"):
+        if file_name not in include:
+            continue
+        with open(os.path.join("../config", file_name)) as f:
+            all_params = json.load(f)
+        if all_params["model_params"]["model"] != "resnet":
+            for svrg_flag in [True, False]:
+                if all_params["model_params"]["gradient_penalty"] == 0.0:
+                    all_params["model_params"]["evaluate_frequency"] = 10000
+                    all_params["model_params"]["num_samples"] = 25000
+                    all_params["model_params"]["num_iter"] = 200000
+                    all_params["optimizer_params"]["svrg"] = svrg_flag
+                    all_params["model_params"]["var_evaluate_frequency"] = 20
+                    # all_params["optimizer_params"]["learning_rate_dis"] = 0.0001
+                    # all_params["optimizer_params"]["learning_rate_gen"] = 0.0001
+                    all_params["optimizer_params"]["average"] = False
+                    # if all_params["optimizer_params"]["name"] == "adam":
+                    #     all_params["optimizer_params"]["average"] = False
 
+                    print(json.dumps(all_params, indent=4))
+                    with wandb.init(entity="optimproject", project='optimproj', config=all_params, reinit=True) as r:
+                        wandb.save(os.path.join(wandb.run.dir, "*.ckpt"))
+                        run_config(all_params, "cifar10", "testexperiment")
 
-
+                    print("\n\n")
