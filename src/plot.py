@@ -9,7 +9,6 @@ svrg_run_paths = {"adapegsvrg_optimistic": api.run("optimproject/optimproj/3k93d
                   "extraadam_svrg": api.run("optimproject/optimproj/j0o8oyqs")}
 
 fig, axs = plt.subplots(2, sharex=True)
-x_data = list(range(0, 12))
 
 for run_name, run in svrg_run_paths.items():
     if run.state == "finished":
@@ -29,8 +28,8 @@ for run_name, run in svrg_run_paths.items():
 
         print(len(gen_data))
 
-        axs[0].plot(x_data, gen_data[:12], label=run_name)
-        axs[1].plot(x_data, dis_data[:12], label=run_name)
+        axs[0].plot(list(range(len(gen_data))), gen_data, label=run_name)
+        axs[1].plot(list(range(len(dis_data))), dis_data, label=run_name)
 
 
 axs[0].legend()
