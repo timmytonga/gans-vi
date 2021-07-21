@@ -727,6 +727,8 @@ def get_adapeg_params():
     for lr in [0.0001]:
         for svrg_flag in [True, False]:
             for optimistic_flag in [True, False]:
+                if svrg_flag and optimistic_flag:
+                    continue
                 if svrg_flag:
                     optim_param_base = {
                         "name": "adapegsvrg",
@@ -836,24 +838,24 @@ if __name__ == "__main__":
     #
     #     run.finish()
 
-    all_params = get_adapeg_params()
-    for opt_i in all_params["optimizer_params"]:
-        inner_params = {}
-        inner_params["model_params"] = all_params["model_params"]
-        inner_params["optimizer_params"] = opt_i
+    # all_params = get_adapeg_params()
+    # for opt_i in all_params["optimizer_params"]:
+    #     inner_params = {}
+    #     inner_params["model_params"] = all_params["model_params"]
+    #     inner_params["optimizer_params"] = opt_i
+    #
+    #
+    #     inner_params["model_params"]["evaluate_frequency"] = 10000
+    #     inner_params["model_params"]["var_evaluate_frequency"] = 20
+    #     inner_params["model_params"]["num_samples"] = 25000
+    #     inner_params["model_params"]["num_iter"] = 200000
+    #     inner_params["optimizer_params"]["average"] = False
+    #     print(json.dumps(inner_params, indent=4))
+    #     with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
+    #         run_config(inner_params, "cifar10", "testexperiment")
 
 
-        inner_params["model_params"]["evaluate_frequency"] = 10000
-        inner_params["model_params"]["var_evaluate_frequency"] = 20
-        inner_params["model_params"]["num_samples"] = 25000
-        inner_params["model_params"]["num_iter"] = 200000
-        inner_params["optimizer_params"]["average"] = False
-        print(json.dumps(inner_params, indent=4))
-        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
-            run_config(inner_params, "cifar10", "testexperiment")
-
-
-    include = {"default_dcgan_wgan_optimisticadam.json"}
+    include = {"default_dcgan_wgan_extraadam.json"}
     for file_name in os.listdir("../config"):
         if file_name not in include:
             continue
