@@ -64,6 +64,9 @@ class Extragradient(Optimizer):
         Stores the old gradient table for recalibration purposes.
         """
 
+        if not self.defaults["svrg"]:
+            return
+
         for group in self.param_groups:
             for p in group['params']:
                 param_state = self.state[p]
@@ -189,11 +192,14 @@ class Extragradient(Optimizer):
                     ginorm_acum += gi.norm()**2 #torch.dot(gi, gi)
                     layer_gradient_norm_sqs[layernum].append(var_norm_sq)
 
-                    gktbl_old = param_state['gktbl_old']
-                    gavg_old = param_state['gavg_old'].type_as(p.data).cpu()
-                    gi_old = gktbl_old[batch_id, :]
-                    #pdb.set_trace()
-                    vr_step = gi - gi_old + gavg_old
+                    if group["svrg"]:
+                        gktbl_old = param_state['gktbl_old']
+                        gavg_old = param_state['gavg_old'].type_as(p.data).cpu()
+                        gi_old = gktbl_old[batch_id, :]
+                        #pdb.set_trace()
+                        vr_step = gi - gi_old + gavg_old
+                    else:
+                        vr_step = gi
                     vr_acum += (vr_step - gavg).norm()**2 #torch.dot(vr_step - gavg, vr_step - gavg)
                     cos_acum += torch.sum(gavg*gi)
 
