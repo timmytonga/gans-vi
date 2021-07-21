@@ -161,7 +161,8 @@ def retrieve_optimizer(opt_dict,
                                                   betas=(opt_dict["beta1"], opt_dict["beta2"]),
                                                   squared_grad=opt_dict["squared_grad"],
                                                   optimistic=opt_dict["optimistic"],
-                                                  model=discriminator)
+                                                  model=discriminator,
+                                                  svrg=opt_dict["svrg"])
 
         gen_optimizer = AdaPEGSVRG.AdaPEGAdamSVRG(generator.parameters(),
                                                   vr_from_epoch=opt_dict["vr_after"],
@@ -171,7 +172,8 @@ def retrieve_optimizer(opt_dict,
                                                   betas=(opt_dict["beta1"], opt_dict["beta2"]),
                                                   squared_grad=opt_dict["squared_grad"],
                                                   optimistic=opt_dict["optimistic"],
-                                                  model=generator)
+                                                  model=generator,
+                                                  svrg=opt_dict["svrg"])
 
     elif opt_name == "adaptive_first":
 
@@ -307,12 +309,12 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
 
         loop.set_description(f"EPOCH: {epoch}")
         if optim_params["name"].endswith("svrg") \
-                or (optim_params["name"] == "extraadam" and optim_params["svrg"]) \
-                or (optim_params["name"] == "optimisticadam" and optim_params["svrg"]):
-            if epoch >= 1:
-                if epoch >= 2 and (epoch + 1) % model_params["var_evaluate_frequency"] == 0:
+                or optim_params["name"] == "extraadam" or optim_params["name"] == "optimisticadam":
+            if optim_params["svrg"] or model_params["var_evaluate_frequency"] > 0:
+                if model_params["var_evaluate_frequency"] > 0 and epoch >= 2 and (epoch + 1) % model_params["var_evaluate_frequency"] == 0:
                     dis_optimizer.store_old_table()
                     gen_optimizer.store_old_table()
+
 
                 recalibrate(model_params=model_params,
                             train_loader=trainloader,
@@ -322,14 +324,16 @@ def runner(trainloader, generator, discriminator, optim_params, model_params, de
                             dis_optimizer=dis_optimizer,
                             device=device)
 
-                if epoch >= 2 and epoch % model_params["var_evaluate_frequency"] == 0:
-                    dis_variance = dis_optimizer.epoch_diagnostics()
-                    gen_variance = gen_optimizer.epoch_diagnostics()
+                if model_params["var_evaluate_frequency"] > 0:
+                    if epoch % model_params["var_evaluate_frequency"] == 0:
+                        if epoch >= 2 or not optim_params["svrg"]:
+                            dis_variance = dis_optimizer.epoch_diagnostics()
+                            gen_variance = gen_optimizer.epoch_diagnostics()
 
-                    wandb.log({
-                        "DIS_VARIANCE": dis_variance,
-                        "GEN_VARIANCE": gen_variance
-                    })
+                            wandb.log({
+                                "DIS_VARIANCE": dis_variance,
+                                "GEN_VARIANCE": gen_variance
+                            })
 
         for i, data in loop:
             x_true, _ = data
@@ -842,14 +846,14 @@ if __name__ == "__main__":
         inner_params["model_params"] = all_params["model_params"]
         inner_params["optimizer_params"] = opt_i
 
-
+        inner_params["optimizer_params"]["svrg"] = False
         inner_params["model_params"]["evaluate_frequency"] = 10000
-        inner_params["model_params"]["var_evaluate_frequency"] = 20
+        inner_params["model_params"]["var_evaluate_frequency"] = 1
         inner_params["model_params"]["num_samples"] = 25000
         inner_params["model_params"]["num_iter"] = 200000
         inner_params["optimizer_params"]["average"] = False
         print(json.dumps(inner_params, indent=4))
-        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
+        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
             run_config(inner_params, "cifar10", "testexperiment")
 
 
