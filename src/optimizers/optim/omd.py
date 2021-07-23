@@ -242,7 +242,10 @@ class OptimisticAdam(Optimizer):
             cos_acums.append(cosim)
             variances.append(var_acum)
 
-        variance = sum(variances)/len(variances)
+        if self.defaults["svrg"]:
+            variance = sum(vr_step_variance)/len(vr_step_variance)
+        else:
+            variance = sum(variances)/len(variances)
         return variance
 
     def step(self, batch_id, closure=None):
