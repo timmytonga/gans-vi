@@ -3,3 +3,4 @@ src/outdir/
 src/wandb/
 .idea/
 src/tflib/
+src/fig1.png

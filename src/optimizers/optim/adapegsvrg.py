@@ -10,7 +10,7 @@ required = object()
 class AdaPEGAdamSVRG(Optimizer):
     def __init__(self, params, nbatches, model,
                  vr_from_epoch, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, amsgrad=False, squared_grad=False, optimistic=False):
+                 weight_decay=0, amsgrad=False, squared_grad=False, optimistic=False, svrg=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -20,7 +20,7 @@ class AdaPEGAdamSVRG(Optimizer):
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad, squared_grad=squared_grad, optimistic=optimistic)
+                        weight_decay=weight_decay, amsgrad=amsgrad, squared_grad=squared_grad, optimistic=optimistic, svrg=svrg)
 
         self.nbatches = nbatches
         self.model = model
@@ -28,7 +28,9 @@ class AdaPEGAdamSVRG(Optimizer):
         self.batches_processed = 0
         self.epoch = 0
         self.running_tmp = {}
+        self.svrg = svrg
         super(AdaPEGAdamSVRG, self).__init__(params, defaults)
+        self.initialize()
 
     def initialize(self):
         for group in self.param_groups:
@@ -59,6 +61,8 @@ class AdaPEGAdamSVRG(Optimizer):
         """
         Stores the old gradient table for recalibration purposes.
         """
+        if not self.svrg:
+            return
 
         for group in self.param_groups:
             for p in group['params']:
@@ -163,11 +167,14 @@ class AdaPEGAdamSVRG(Optimizer):
                     ginorm_acum += gi.norm()**2 #torch.dot(gi, gi)
                     layer_gradient_norm_sqs[layernum].append(var_norm_sq)
 
-                    gktbl_old = param_state['gktbl_old']
-                    gavg_old = param_state['gavg_old'].type_as(p.data).cpu()
-                    gi_old = gktbl_old[batch_id, :]
-                    #pdb.set_trace()
-                    vr_step = gi - gi_old + gavg_old
+                    if self.svrg:
+                        gktbl_old = param_state['gktbl_old']
+                        gavg_old = param_state['gavg_old'].type_as(p.data).cpu()
+                        gi_old = gktbl_old[batch_id, :]
+                        #pdb.set_trace()
+                        vr_step = gi - gi_old + gavg_old
+                    else:
+                        vr_step = gi
                     vr_acum += (vr_step - gavg).norm()**2 #torch.dot(vr_step - gavg, vr_step - gavg)
                     cos_acum += torch.sum(gavg*gi)
 
@@ -198,11 +205,12 @@ class AdaPEGAdamSVRG(Optimizer):
             for p in group['params']:
                 if p.grad is None:
                     continue
-                param_state = self.state[p]
-                gktbl = param_state['gktbl']
-                gavg = param_state['gavg'].type_as(p.data)
-                gi = gktbl[batch_id, :].cuda()
-                p.grad.data.sub_(gi - gavg)
+                if self.svrg:
+                    param_state = self.state[p]
+                    gktbl = param_state['gktbl']
+                    gavg = param_state['gavg'].type_as(p.data)
+                    gi = gktbl[batch_id, :].cuda()
+                    p.grad.data.sub_(gi - gavg)
                 grad = p.grad.data
                 if grad.is_sparse:
                     raise RuntimeError(
