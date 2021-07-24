@@ -66,7 +66,6 @@ class AdaPEGAdamSVRG(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
-                gk = p.grad.data
 
                 param_state = self.state[p]
 
@@ -188,7 +187,10 @@ class AdaPEGAdamSVRG(Optimizer):
             cos_acums.append(cosim)
             variances.append(var_acum)
 
-        variance = sum(variances)/len(variances)
+        if self.defaults["svrg"]:
+            variance = sum(vr_step_variance)/len(vr_step_variance)
+        else:
+            variance = sum(variances)/len(variances)
         return variance
 
     def __setstate__(self, state):
