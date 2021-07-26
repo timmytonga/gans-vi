@@ -16,21 +16,21 @@ for run_name, run in svrg_run_paths.items():
         dis_data = []
 
         inceptions = []
-        if run_name == "adapegsvrg_optimistic":
-            for i, row in run.history().iterrows():
-                if str(row["INCEPTION_SCORE"]) != "nan":
-                    inceptions.append(row["INCEPTION_SCORE"])
-                if (i+2) % 20 == 0:
-                    gen_data.append(row["GEN_VARIANCE"])
-                    dis_data.append(row["DIS_VARIANCE"])
-        else:
-            for i, row in run.history().iterrows():
-                if str(row["GEN_VARIANCE"]) != "nan":
-                    gen_data.append(row["GEN_VARIANCE"])
-                if str(row["DIS_VARIANCE"]) != "nan":
-                    dis_data.append(row["DIS_VARIANCE"])
-                if str(row["INCEPTION_SCORE"]) != "nan":
-                    inceptions.append(row["INCEPTION_SCORE"])
+        # if run_name == "adapegsvrg_optimistic":
+        #     for i, row in run.history().iterrows():
+        #         if str(row["INCEPTION_SCORE"]) != "nan":
+        #             inceptions.append(row["INCEPTION_SCORE"])
+        #         if (i+2) % 20 == 0:
+        #             gen_data.append(row["GEN_VARIANCE"])
+        #             dis_data.append(row["DIS_VARIANCE"])
+        # else:
+        for i, row in run.history().iterrows():
+            if str(row["GEN_VARIANCE"]) != "nan":
+                gen_data.append(row["GEN_VARIANCE"])
+            if str(row["DIS_VARIANCE"]) != "nan":
+                dis_data.append(row["DIS_VARIANCE"])
+            if str(row["INCEPTION_SCORE"]) != "nan":
+                inceptions.append(row["INCEPTION_SCORE"])
 
         print(len(gen_data))
 
