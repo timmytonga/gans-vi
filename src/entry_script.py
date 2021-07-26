@@ -856,7 +856,7 @@ if __name__ == "__main__":
         with open(os.path.join("../config", file_name)) as f:
             all_params = json.load(f)
         if all_params["model_params"]["model"] != "resnet":
-            for svrg_flag in [True, False]:
+            for svrg_flag in [False, True]:
                 if all_params["model_params"]["gradient_penalty"] != 0.0:
                     all_params["model_params"]["evaluate_frequency"] = 10000
                     all_params["model_params"]["num_samples"] = 25000
