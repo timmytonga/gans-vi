@@ -152,7 +152,7 @@ class Extragradient(Optimizer):
         """
         Called after recalibrate, returns variance
         """
-        m = self.nbatches
+        m = self.defaults["nbatches"]
 
         layernum = 0
         layer_gradient_norm_sqs = []

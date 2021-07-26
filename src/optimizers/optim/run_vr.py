@@ -40,6 +40,7 @@ def recalibrate(model_params, train_loader, generator, discriminator, gen_optimi
 
         p_true, p_gen = discriminator(x_true), discriminator(x_gen)
         dis_loss = - utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
+        gen_loss = - dis_loss.clone()
         if model_params["gradient_penalty"] != 0:
             penalty = discriminator.get_penalty(x_true.data, x_gen.data)
             dis_loss += penalty * model_params["gradient_penalty"]
@@ -60,8 +61,8 @@ def recalibrate(model_params, train_loader, generator, discriminator, gen_optimi
         for p in discriminator.parameters():
             p.requires_grad = False
 
-        p_true, p_gen = discriminator(x_true), discriminator(x_gen)
-        gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
+        # p_true, p_gen = discriminator(x_true), discriminator(x_gen)
+        # gen_loss = utils.compute_gan_loss(p_true, p_gen, mode=model_params["mode"])
 
         gen_optimizer.zero_grad()
         gen_loss.backward(retain_graph=True)

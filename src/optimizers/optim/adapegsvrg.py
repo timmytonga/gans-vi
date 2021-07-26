@@ -30,6 +30,7 @@ class AdaPEGAdamSVRG(Optimizer):
         self.running_tmp = {}
         self.svrg = svrg
         super(AdaPEGAdamSVRG, self).__init__(params, defaults)
+        self.initialize()
 
     def initialize(self):
         for group in self.param_groups:
@@ -65,7 +66,6 @@ class AdaPEGAdamSVRG(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
-                gk = p.grad.data
 
                 param_state = self.state[p]
 

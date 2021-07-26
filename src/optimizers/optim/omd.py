@@ -167,7 +167,6 @@ class OptimisticAdam(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
-                gk = p.grad.data
 
                 param_state = self.state[p]
 
