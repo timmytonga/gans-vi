@@ -837,9 +837,9 @@ if __name__ == "__main__":
         inner_params["model_params"] = all_params["model_params"]
         inner_params["optimizer_params"] = opt_i
 
-        inner_params["optimizer_params"]["svrg"] = False
+        inner_params["optimizer_params"]["svrg"] = True
         inner_params["model_params"]["evaluate_frequency"] = 10000
-        inner_params["model_params"]["var_evaluate_frequency"] = 20
+        inner_params["model_params"]["var_evaluate_frequency"] = 1
         inner_params["model_params"]["num_samples"] = 25000
         inner_params["model_params"]["num_iter"] = 200000
         inner_params["optimizer_params"]["average"] = False
