@@ -3,10 +3,14 @@ import wandb
 
 api = wandb.Api()
 
-svrg_run_paths = {"adapegsvrg_optimistic": api.run("optimproject/optimproj/3k93dg4d"),
-                  "adapegsvrg_nooptimistic": api.run("optimproject/optimproj/2vag1nlz"),
-                  "optimistic_svrg": api.run("optimproject/optimproj/vw1rtpeg"),
-                  "extraadam_svrg": api.run("optimproject/optimproj/j0o8oyqs")}
+svrg_run_paths = {"ADAPEG_SVRG_OPTIMISTIC": api.run("optimproject/optimproj/26aq2hmi"),
+                  "ADAPEG_SVRG_NOOPTIMISTIC": api.run("optimproject/optimproj/2vag1nlz"),
+                  "ADAPEG_NOSVRG_OPTIMISTIC": api.run("optimproject/optimproj/3zov1zk9"),
+                  "ADAPEG_NOSVRG_NOOPTIMISTIC": api.run("optimproject/optimproj/eg6d7yj6"),
+                  "EXTRAADAM_SVRG": api.run("optimproject/optimproj/3nlutv4l"),
+                  "EXTRAADAM_NOSVRG": api.run("optimproject/optimproj/1og4e5uv"),
+                  "OPTIMISTIC_SVRG": api.run("optimproject/optimproj/30t1y6s9"),
+                  "OPTIMISTIC_NOSVRG": api.run("optimproject/optimproj/141c58rl")}
 
 fig, axs = plt.subplots(3, sharex=True, figsize=(10, 10))
 

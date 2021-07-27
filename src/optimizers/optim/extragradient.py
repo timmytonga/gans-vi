@@ -105,7 +105,6 @@ class Extragradient(Optimizer):
             for p in group['params']:
                 if p.grad is None:
                     continue
-                print('hello')
                 gk = p.grad.data.double()
 
                 param_state = self.state[p]
