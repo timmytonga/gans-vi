@@ -101,26 +101,25 @@ class Extragradient(Optimizer):
         # print("recal loss:", loss)
 
         self.recalibration_i += 1
-        if self.defaults["svrg"] == True:
-            for group in self.param_groups:
-                for p in group['params']:
-                    if p.grad is None:
-                        continue
-                    gk = p.grad.data.double()
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                gk = p.grad.data.double()
 
-                    param_state = self.state[p]
+                param_state = self.state[p]
 
-                    gktbl = param_state['gktbl']
-                    gavg = param_state['gavg']
+                gktbl = param_state['gktbl']
+                gavg = param_state['gavg']
 
-                    # pdb.set_trace()
+                # pdb.set_trace()
 
-                    # Online mean/variance calcuation from wikipedia
-                    delta = gk - gavg
-                    gavg.add_(1.0 / self.recalibration_i, delta)
+                # Online mean/variance calcuation from wikipedia
+                delta = gk - gavg
+                gavg.add_(1.0 / self.recalibration_i, delta)
 
-                    #########
-                    gktbl[batch_id, :] = p.grad.data.cpu().clone()
+                #########
+                gktbl[batch_id, :] = p.grad.data.cpu().clone()
 
         return loss
 

@@ -731,7 +731,7 @@ def get_adapeg_params():
     }
 
     for lr in [0.0001]:
-        for svrg_flag in [True, False]:
+        for svrg_flag in [False, True]:
             for optimistic_flag in [True, False]:
                 optim_param_base = {
                     "name": "adapegsvrg",
@@ -833,21 +833,21 @@ if __name__ == "__main__":
     #     run.finish()
 
 
-    all_params = get_adapeg_params()
-    for opt_i in all_params["optimizer_params"]:
-        inner_params = {}
-        inner_params["model_params"] = all_params["model_params"]
-        inner_params["optimizer_params"] = opt_i
-
-        inner_params["model_params"]["evaluate_frequency"] = 10000
-        inner_params["model_params"]["var_evaluate_frequency"] = 20
-        inner_params["model_params"]["num_samples"] = 25000
-        inner_params["model_params"]["num_iter"] = 200000
-        inner_params["optimizer_params"]["average"] = False
-        print(json.dumps(inner_params, indent=4))
-
-        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
-            run_config(inner_params, "cifar10", "testexperiment")
+    # all_params = get_adapeg_params()
+    # for opt_i in all_params["optimizer_params"]:
+    #     inner_params = {}
+    #     inner_params["model_params"] = all_params["model_params"]
+    #     inner_params["optimizer_params"] = opt_i
+    #
+    #     inner_params["model_params"]["evaluate_frequency"] = 10000
+    #     inner_params["model_params"]["var_evaluate_frequency"] = 20
+    #     inner_params["model_params"]["num_samples"] = 25000
+    #     inner_params["model_params"]["num_iter"] = 200000
+    #     inner_params["optimizer_params"]["average"] = False
+    #     print(json.dumps(inner_params, indent=4))
+    #
+    #     with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
+    #         run_config(inner_params, "cifar10", "testexperiment")
 
 
     include = {"default_dcgan_wgangp_optimisticextraadam.json", "default_dcgan_wgangp_extraadam.json"}
@@ -857,8 +857,8 @@ if __name__ == "__main__":
         with open(os.path.join("../config", file_name)) as f:
             all_params = json.load(f)
         if all_params["model_params"]["model"] != "resnet":
-            for svrg_flag in [True, False]:
-                if all_params["model_params"]["gradient_penalty"] == 0.0:
+            for svrg_flag in [False]:
+                if all_params["model_params"]["gradient_penalty"] != 0.0:
                     all_params["model_params"]["evaluate_frequency"] = 10000
                     all_params["model_params"]["num_samples"] = 25000
                     all_params["model_params"]["num_iter"] = 200000
