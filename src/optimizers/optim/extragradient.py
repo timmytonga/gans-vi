@@ -427,7 +427,7 @@ class ExtraAdam(Extragradient):
             # Use the max. for normalizing running avg. of gradient
             denom = max_exp_avg_sq.sqrt().add_(group['eps'])
         else:
-            denom = exp_avg_sq.sqrt().add_(group['eps'])
+            denom = torch.ones_like(exp_avg_sq) # .sqrt().add_(group['eps']) REMEMBER TO DELETE ONCE DONE
 
         bias_correction1 = 1 - beta1 ** state['step']
         bias_correction2 = 1 - beta2 ** state['step']

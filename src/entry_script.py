@@ -290,7 +290,7 @@ def step(opt_params, optimizer, ts, loss, epoch, lr, batch_id, retain_graph=Fals
 
 
 def runner(trainloader, generator, discriminator, optim_params, model_params, device):
-    if optim_params["name"].endswith("svrg"):
+    if optim_params["svrg"]:
         training_dataset = trainloader[1]
         trainloader = trainloader[0]
 
@@ -579,7 +579,7 @@ def run_config(all_params, dataset: str, experiment_name: str):
             os.makedirs(dataset_dir, exist_ok=True)
         if name == "cifar10":
 
-            if opt_params["name"].endswith("svrg"):
+            if opt_params["svrg"]:
                 transform = transforms.Compose([
                     transforms.RandomHorizontalFlip(),
                     transforms.RandomCrop(32, padding=4),
@@ -739,12 +739,15 @@ def get_extrasgd_params():
         "optimizer_params": []
     }
 
-    for svrg_flag in [True, False]:
+    for svrg_flag in [False, True]:
         base_optim_params = {
-            "name": "extrasgd",
+            "name": "extraadam",
             "svrg": svrg_flag,
-            "learning_rate_dis": 4 * 10e-2,
-            "learning_rate_gen": 10e-2,
+            "learning_rate_dis": 4 * 10e-4,
+            "learning_rate_gen": 10e-4,
+            "beta1": 0,
+            "beta2": 0
+
         }
         params["optimizer_params"].append(base_optim_params)
 
@@ -882,13 +885,13 @@ if __name__ == "__main__":
         inner_params["model_params"] = all_params["model_params"]
         inner_params["optimizer_params"] = opt_i
         inner_params["model_params"]["evaluate_frequency"] = 10000
-        inner_params["model_params"]["var_evaluate_frequency"] = 20
-        inner_params["model_params"]["num_samples"] = 25000
+        inner_params["model_params"]["var_evaluate_frequency"] = 0
+        inner_params["model_params"]["num_samples"] = 5
         inner_params["model_params"]["num_iter"] = 200000
         inner_params["optimizer_params"]["average"] = False
         print(json.dumps(inner_params, indent=4))
 
-        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True) as r:
+        with wandb.init(entity="optimproject", project='optimproj', config=inner_params, reinit=True, mode="disabled") as r:
             run_config(inner_params, "cifar10", "testexperiment")
 
     # include = {"default_dcgan_wgangp_optimisticextraadam.json", "default_dcgan_wgangp_extraadam.json"}
